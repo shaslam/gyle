@@ -1,0 +1,255 @@
+{
+  "beerjson": {
+    "version": 1,
+    "recipes": [
+      {
+        "name": "House Pale Ale",
+        "type": "all grain",
+        "author": "Unknown",
+        "created": "2026-11-10",
+        "batch_size": {
+          "unit": "l",
+          "value": 21
+        },
+        "efficiency": {
+          "brewhouse": {
+            "unit": "%",
+            "value": 72
+          }
+        },
+        "boil": {
+          "boil_time": {
+            "unit": "min",
+            "value": 60
+          }
+        },
+        "style": {
+          "name": "American Pale Ale",
+          "type": "beer",
+          "style_guide": "BJCP 2021",
+          "category": "18",
+          "category_number": 18,
+          "style_letter": "B"
+        },
+        "ingredients": {
+          "fermentable_additions": [
+            {
+              "name": "Maris Otter",
+              "type": "grain",
+              "amount": {
+                "unit": "kg",
+                "value": 4.2
+              },
+              "color": {
+                "unit": "EBC",
+                "value": 6
+              },
+              "yield": {
+                "potential": {
+                  "unit": "sg",
+                  "value": 1.038
+                }
+              }
+            },
+            {
+              "name": "Crystal Light",
+              "type": "grain",
+              "amount": {
+                "unit": "kg",
+                "value": 0.3
+              },
+              "color": {
+                "unit": "EBC",
+                "value": 80
+              },
+              "yield": {
+                "potential": {
+                  "unit": "sg",
+                  "value": 1.034
+                }
+              }
+            },
+            {
+              "name": "Wheat Malt",
+              "type": "grain",
+              "amount": {
+                "unit": "kg",
+                "value": 0.2
+              },
+              "color": {
+                "unit": "EBC",
+                "value": 4
+              },
+              "yield": {
+                "potential": {
+                  "unit": "sg",
+                  "value": 1.038
+                }
+              }
+            }
+          ],
+          "hop_additions": [
+            {
+              "name": "Magnum",
+              "form": "pellet",
+              "alpha_acid": {
+                "unit": "%",
+                "value": 13
+              },
+              "amount": {
+                "unit": "g",
+                "value": 18
+              },
+              "timing": {
+                "use": "add_to_boil",
+                "duration": {
+                  "unit": "min",
+                  "value": 60
+                }
+              }
+            },
+            {
+              "name": "Cascade",
+              "form": "pellet",
+              "alpha_acid": {
+                "unit": "%",
+                "value": 6.5
+              },
+              "amount": {
+                "unit": "g",
+                "value": 25
+              },
+              "timing": {
+                "use": "add_to_boil",
+                "duration": {
+                  "unit": "min",
+                  "value": 10
+                }
+              }
+            },
+            {
+              "name": "Cascade",
+              "form": "pellet",
+              "alpha_acid": {
+                "unit": "%",
+                "value": 6.5
+              },
+              "amount": {
+                "unit": "g",
+                "value": 30
+              },
+              "timing": {
+                "use": "add_to_boil",
+                "duration": {
+                  "unit": "min",
+                  "value": 20
+                }
+              },
+              "x_use": "whirlpool",
+              "x_temp": {
+                "unit": "C",
+                "value": 80
+              }
+            },
+            {
+              "name": "Citra",
+              "form": "pellet",
+              "alpha_acid": {
+                "unit": "%",
+                "value": 12.5
+              },
+              "amount": {
+                "unit": "g",
+                "value": 40
+              },
+              "timing": {
+                "use": "add_to_fermentation",
+                "duration": {
+                  "unit": "day",
+                  "value": 4
+                }
+              }
+            }
+          ],
+          "culture_additions": [
+            {
+              "name": "SafAle US-05",
+              "type": "ale",
+              "form": "dry",
+              "producer": "Fermentis",
+              "attenuation": {
+                "unit": "%",
+                "value": 81
+              },
+              "amount": {
+                "unit": "pkg",
+                "value": 1
+              }
+            }
+          ],
+          "miscellaneous_additions": [
+            {
+              "name": "Irish moss",
+              "type": "fining",
+              "amount": {
+                "unit": "g",
+                "value": 5
+              },
+              "timing": {
+                "use": "add_to_boil",
+                "duration": {
+                  "unit": "min",
+                  "value": 10
+                }
+              }
+            }
+          ]
+        },
+        "mash": {
+          "name": "Mash",
+          "grain_temperature": {
+            "unit": "C",
+            "value": 18
+          },
+          "mash_steps": [
+            {
+              "name": "Saccharification",
+              "type": "infusion",
+              "step_temperature": {
+                "unit": "C",
+                "value": 66
+              },
+              "step_time": {
+                "unit": "min",
+                "value": 60
+              }
+            }
+          ]
+        },
+        "fermentation": {
+          "name": "Fermentation",
+          "fermentation_steps": [
+            {
+              "name": "Primary",
+              "start_temperature": {
+                "unit": "C",
+                "value": 19
+              },
+              "step_time": {
+                "unit": "day",
+                "value": 14
+              }
+            }
+          ]
+        },
+        "carbonation": 2.4,
+        "notes": "Example recipe that ships with the app. Edit it, duplicate it or delete it.",
+        "x_mash_ratio": {
+          "unit": "l/kg",
+          "value": 3
+        },
+        "x_modified": "2026-11-10"
+      }
+    ]
+  }
+}
