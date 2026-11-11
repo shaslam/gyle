@@ -1701,10 +1701,31 @@ const TOOL_DESC = {
 };
 
 // The tools index: one link per calculator.
+// Line drawings for the tools, on a 32-unit grid, drawn in the badge's ink colour.
+const TOOL_ICONS = {
+  // a percent sign with rising bubbles
+  abv: '<circle cx="10" cy="11" r="3.2"/><circle cx="20" cy="23" r="3.2"/><path d="M22 8 8 26"/><circle cx="25" cy="15" r="1.3" class="fill"/><circle cx="27" cy="9" r="1"  class="fill"/>',
+  // a hydrometer floating in a sample jar
+  hydro: '<path d="M9 9v16a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3V9"/><path d="M9 14h4.5M18.5 14H23" class="thin"/><path d="M16 4v12"/><path d="M14 16h4v6a2 2 0 0 1-4 0z" class="fill"/>',
+  // light bending through a prism, with a drop of wort on top
+  refrac: '<path d="M16 9 26 26H6z"/><path d="M3 21l8.5-3.5M20.5 17.5 29 23" class="thin"/><path d="M16 2.5c0 2-1.8 2.7-1.8 4.2a1.8 1.8 0 0 0 3.6 0c0-1.5-1.8-2.2-1.8-4.2z" class="fill"/>',
+  // a bottle with a sugar cube beside it
+  prime: '<path d="M11 4h4v6l2.5 3.5V27a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1V13.5L11 10z"/><path d="M8.5 19h9" class="thin"/><rect x="20" y="20" width="7" height="7" rx="1"/><path d="M22.5 22.5h2" class="thin"/>',
+  // a kettle with steam rising
+  dilute: '<path d="M7 15h18v9a4 4 0 0 1-4 4H11a4 4 0 0 1-4-4z"/><path d="M5 15h22"/><path d="M12 11c-1.5-1.5 1.5-2.5 0-4.5M16 11c-1.5-1.5 1.5-2.5 0-4.5M20 11c-1.5-1.5 1.5-2.5 0-4.5" class="thin"/>',
+  // a thermometer with heat lines
+  strike: '<path d="M13 19V7a3 3 0 0 1 6 0v12a5 5 0 1 1-6 0z"/><circle cx="16" cy="23" r="2.2" class="fill"/><path d="M16 21V12"/><path d="M23 9h3M23 13h3M23 17h2" class="thin"/>',
+  // two arrows, one each way
+  convert: '<path d="M6 11h18l-4-4M26 21H8l4 4"/>',
+  // yeast cells, one budding
+  pitch: '<circle cx="12" cy="13" r="5"/><circle cx="19.5" cy="8.5" r="2.3"/><circle cx="21" cy="21" r="4.5"/><circle cx="10" cy="24" r="2.6"/><circle cx="12" cy="13" r="1.2" class="fill"/><circle cx="21" cy="21" r="1.1" class="fill"/>',
+};
+const toolIcon = (id, size = 46) => `<span class="tool-icon" style="--s:${size}px" aria-hidden="true"><svg viewBox="0 0 32 32" width="${Math.round(size * 0.6)}" height="${Math.round(size * 0.6)}">${TOOL_ICONS[id] || ''}</svg></span>`;
+
 function toolsView() {
   ctx = {};
   view.innerHTML = `<div class="page-head"><h1>Tools</h1></div><div class="list">${TOOLS.map(t => `<a class="item tool-link" href="#tool/${t.id}">
-      <span class="item-main"><strong>${t.title}</strong><small>${TOOL_DESC[t.id]}</small></span><span class="go" aria-hidden="true">→</span>
+      ${toolIcon(t.id)}<span class="item-main"><strong>${t.title}</strong><small>${TOOL_DESC[t.id]}</small></span><span class="go" aria-hidden="true">→</span>
     </a>`).join('')}</div>`;
 }
 
@@ -1728,7 +1749,7 @@ function toolView(id) {
     },
   };
   view.innerHTML = `<div class="page-head"><a class="back" href="#tools">← Tools</a></div>
-    <section class="card tool"><div class="sec-head"><h2>${t.title}</h2></div>
+    <section class="card tool"><div class="sec-head tool-head">${toolIcon(t.id, 40)}<h2>${t.title}</h2></div>
       <p class="hint">${TOOL_DESC[t.id]}</p>
       <div class="tool-fields">${t.fields.map(([k, label]) =>
         `<label class="fld" for="t-${t.id}-${k}"><span>${label}</span><input id="t-${t.id}-${k}" type="number" step="${v[k] > 0.9 && v[k] < 1.2 && !/factor|Rate/.test(label) ? 0.001 : 'any'}" inputmode="decimal" data-tool="${k}" value="${v[k]}"></label>`).join('')}</div>

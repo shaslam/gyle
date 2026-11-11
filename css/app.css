@@ -295,6 +295,18 @@ input[type="checkbox"] { width: 22px; height: 22px; flex: 0 0 22px; accent-color
 /* ---- tool index and single-tool pages ---- */
 .tool-link { flex-wrap: nowrap; padding: 14px 16px; }
 .tool-link .go { flex: 0 0 auto; font-size: 20px; color: var(--warn); }
+/* Tool badges: a small green beer mat with a gold keyline and a cream line drawing. */
+.tool-icon {
+  flex: 0 0 var(--s); width: var(--s); height: var(--s); border-radius: 50%; display: grid; place-items: center;
+  background: var(--green); color: var(--on-green);
+  box-shadow: inset 0 0 0 3px var(--green), inset 0 0 0 4.5px var(--gold), 0 2px 0 rgb(74 52 14 / .28);
+}
+.tool-icon svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tool-icon svg .thin { stroke-width: 1.4; opacity: .85; }
+.tool-icon svg .fill { fill: var(--gold); stroke: none; }
+.tool-link:hover .tool-icon { color: var(--gold); }
+.tool-head { justify-content: flex-start; gap: 12px; }
+.tool-head h2 { background: none; padding-left: 0; }
 .tool-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 14px; }
 .tool-fields .fld > span { white-space: normal; }
 .tool .results div { padding-top: 11px; }
