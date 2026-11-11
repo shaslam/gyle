@@ -91,7 +91,9 @@ commit, conflict retry, delete; ThingSpeak fetch, hourly down-sampling, stable-g
 2. **Repos**: GitHub Pages only serves public repos on the free plan, so the app repo is public. If he keeps using git storage, data goes in a separate private repo set in Settings.
 3. **iSpindel**: stock firmware. He needs to check whether its Service Type list offers ThingSpeak; if not, reflash to GravityMon. Then link a real channel on a brew log.
 4. **Token trust**: he found a pasted GitHub token stored in localStorage "dodgy". Proper "Sign in with GitHub" needs a small server-side function to hold a client secret; parked as too much for now. The cheap hardening is done: `index.html` has a Content-Security-Policy meta tag that limits connections to GitHub, `*.supabase.co` and ThingSpeak, and the fonts are served from `fonts/`. A new outside service, or a self-hosted Supabase, needs its host added to `connect-src`.
-5. **Offered but not built**: yeast and "other additions" still use the old full-width rows (fermentables and hops got compact rows plus popups with substitutes); RO-water dilution in the Water card; moving a recipe to the bottom of the brew queue when a brew is started from it; an SRM-first display setting; sparge-water acidification.
+5. **Offered but not built**: RO-water dilution in the Water card; moving a recipe to the bottom of the brew queue when a brew is started from it; an SRM-first display setting; sparge-water acidification.
+
+All four ingredient lists (fermentables, hops, yeast, other additions) now use compact rows: tap the name for a popup, edit the amount inline. Only fermentables and hops offer substitutes in their popups.
 
 ## Design direction
 

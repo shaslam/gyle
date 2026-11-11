@@ -138,6 +138,15 @@ const aromaWords = vals => {
 // How much an addition contributes to aroma, per gram: dry hops and whirlpool most, long boils nothing.
 const aromaWeight = h => (h.use === 'dry hop' ? 1 : h.use === 'whirlpool' ? 0.8 : (h.use || 'boil') === 'boil' ? (h.time <= 5 ? 0.6 : h.time <= 10 ? 0.4 : h.time <= 20 ? 0.2 : 0) : 0);
 
+// Attenuation as a ring: the filled share of the circle is the share of sugar the yeast eats.
+function yeastGlyph(att, size = 26) {
+  const a = Math.min(100, Math.max(0, +att || 0)), r = 38, c = 2 * Math.PI * r;
+  return `<span class="chip" data-tip="${n(a, 0)} % attenuation"><svg class="radar yeast" viewBox="0 0 100 100" width="${size}" height="${size}" role="img" aria-label="Attenuation ${n(a, 0)} %"><circle class="ring" cx="50" cy="50" r="${r}"/><circle class="shape" cx="50" cy="50" r="${r}" stroke-dasharray="${(c * a / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 50 50)"/></svg></span>`;
+}
+const miscWhen = m => ({
+  mash: 'mash', boil: `boil · ${m.time ?? 0} min`, fermentation: 'fermenter', package: 'packaging',
+}[m.use || 'boil'] + (m.type && m.type !== 'other' ? ` · ${m.type}` : ''));
+
 const hopWhen = h => ({
   boil: `boil · ${h.time ?? 0} min`, 'first wort': 'first wort', mash: 'mash',
   whirlpool: `whirlpool · ${h.time ?? 0} min at ${h.temp ?? 80} °C`, 'dry hop': `dry hop · ${h.time ?? 0} days`,
@@ -168,25 +177,23 @@ const LISTS = {
   },
   yeasts: {
     title: 'Yeast', empty: 'No yeast yet. FG is estimated at 75% attenuation until you add one.',
-    blank: () => ({ name: '', lab: '', form: 'dry', attenuation: 75, amount: 1 }),
-    cols: () => [
-      { f: 'name', label: 'Yeast', cls: 'w-name', list: 'dl-yeast', autofill: 'yeasts' },
-      { f: 'lab', label: 'Lab' },
-      { f: 'form', label: 'Form', opts: ['dry', 'liquid', 'slurry', 'culture'] },
-      { f: 'attenuation', label: 'Atten. %', num: 1 },
-      { f: 'amount', label: 'Packs', num: 1 },
-    ],
+    addAct: 'add-yeast',
+    // Name with lab and form, and the number of packs. Lab, form and attenuation are edited in the popup (tap the name).
+    row: (y, i) => `<div class="row compact">
+      <button type="button" class="name-btn glyph" data-act="edit-yeast" data-i="${i}" aria-label="Edit ${esc(y.name || 'yeast')}">${yeastGlyph(y.attenuation)}<span><strong>${esc(y.name || 'Unnamed yeast')}</strong><small class="when">${esc([y.lab, y.form].filter(Boolean).join(' · '))}</small></span></button>
+      <label class="amt" for="f-yeasts-${i}-amount"><span class="sr">Packs of ${esc(y.name)}</span><input id="f-yeasts-${i}-amount" data-p="yeasts.${i}.amount" type="number" step="1" min="0" inputmode="decimal" value="${esc(y.amount ?? '')}"><span aria-hidden="true">pk</span></label>
+      <output class="derived">${Number.isFinite(+y.attenuation) && y.attenuation !== '' ? `${n(+y.attenuation, 0)} %` : ''}</output>
+      <button type="button" class="icon-btn" data-act="remove" data-list="yeasts" data-i="${i}" aria-label="Remove ${esc(y.name || 'row')}">×</button></div>`,
   },
   miscs: {
-    title: 'Other additions', empty: 'Water salts, finings, spices and the like.',
-    blank: () => ({ name: '', type: 'other', amount: 1, unit: 'g', use: 'boil', time: 10 }),
-    cols: () => [
-      { f: 'name', label: 'Addition', cls: 'w-name' },
-      { f: 'amount', label: 'Amount', num: 1 },
-      { f: 'unit', label: 'Unit', opts: ['g', 'ml', 'each'] },
-      { f: 'use', label: 'Use', opts: ['mash', 'boil', 'fermentation', 'package'] },
-      { f: 'time', label: 'Min', num: 1 },
-    ],
+    title: 'Other additions', empty: 'Finings, nutrients, spices and the like. Water salts go in the Water card.',
+    addAct: 'add-misc',
+    // Name with when it goes in, and the amount. Type, unit and timing are edited in the popup (tap the name).
+    row: (m, i) => `<div class="row compact">
+      <button type="button" class="name-btn" data-act="edit-misc" data-i="${i}" aria-label="Edit ${esc(m.name || 'addition')}"><strong>${esc(m.name || 'Unnamed addition')}</strong><small class="when">${esc(miscWhen(m))}</small></button>
+      <label class="amt" for="f-miscs-${i}-amount"><span class="sr">${m.unit === 'each' ? 'Number' : m.unit === 'ml' ? 'Millilitres' : 'Grams'} of ${esc(m.name)}</span><input id="f-miscs-${i}-amount" data-p="miscs.${i}.amount" type="number" step="${m.unit === 'each' ? 1 : 'any'}" min="0" inputmode="decimal" value="${esc(m.amount ?? '')}"><span aria-hidden="true">${m.unit === 'each' ? '×' : esc(m.unit || 'g')}</span></label>
+      <output class="derived"></output>
+      <button type="button" class="icon-btn" data-act="remove" data-list="miscs" data-i="${i}" aria-label="Remove ${esc(m.name || 'row')}">×</button></div>`,
   },
   mash: {
     title: 'Mash', empty: 'No mash steps (extract brew).',
@@ -414,6 +421,131 @@ function hopDialog(recipe, index, done) {
   drawTiming();
   drawPicks();
   drawSubs();
+  dlg.showModal();
+  if (editing) { el('amount').focus(); el('amount').select(); } else el('name').focus();
+}
+
+// Popup for adding a yeast (index null) or editing one. Pick from the built-in list or type your own.
+const YEAST_FORMS = ['dry', 'liquid', 'slurry', 'culture'];
+function yeastDialog(recipe, index, done) {
+  const editing = index != null;
+  const item = editing ? clone(recipe.yeasts[index]) : { name: '', lab: '', form: 'dry', attenuation: 75, amount: 1 };
+  document.querySelector('dialog.sheet')?.remove();
+  const dlg = document.createElement('dialog');
+  dlg.className = 'sheet';
+  dlg.innerHTML = `<form novalidate>
+    <div class="sec-head"><h2>${editing ? 'Edit yeast' : 'Add yeast'}</h2><button type="button" class="icon-btn" data-x aria-label="Close">×</button></div>
+    <label class="fld" for="yd-name"><span>Name</span><input id="yd-name" type="search" autocomplete="off" placeholder="Search yeasts" value="${esc(item.name)}"></label>
+    <div class="picks" id="yd-picks"></div>
+    <p class="hint" id="yd-note" role="status"></p>
+    <div class="row">
+      <label class="fld" for="yd-amount"><span>Packs</span><input id="yd-amount" type="number" step="1" min="0" inputmode="decimal" value="${esc(item.amount ?? '')}"></label>
+      <label class="fld" for="yd-att"><span>Attenuation %</span><input id="yd-att" type="number" step="1" min="0" max="100" inputmode="decimal" value="${esc(item.attenuation ?? '')}"></label>
+    </div>
+    <div class="row">
+      <label class="fld" for="yd-lab"><span>Lab</span><input id="yd-lab" autocomplete="off" value="${esc(item.lab || '')}"></label>
+      <label class="fld" for="yd-form"><span>Form</span><select id="yd-form">${YEAST_FORMS.map(f => `<option${f === (item.form || 'dry') ? ' selected' : ''}>${f}</option>`).join('')}</select></label>
+    </div>
+    <p class="hint">Attenuation sets the estimated FG. Use the lab's figure, or your own from past brews.</p>
+    <div class="foot-actions">
+      <button type="submit" class="btn primary">${editing ? 'Done' : 'Add to recipe'}</button>
+      <button type="button" class="btn" data-x>Cancel</button>
+    </div></form>`;
+  document.body.append(dlg);
+  const el = id => dlg.querySelector('#yd-' + id);
+  const drawPicks = () => {
+    const q = item.name.trim().toLowerCase(), exact = byName(YEASTS, item.name);
+    const hits = editing && exact ? [] : YEASTS.filter(y => !q || exact || `${y.name} ${y.lab}`.toLowerCase().includes(q));
+    el('picks').innerHTML = hits.map(y => `<button type="button" class="pick${y === exact ? ' on' : ''}" data-n="${esc(y.name)}"><span>${esc(y.name)}</span><small>${esc(y.lab)} · ${y.attenuation} %</small></button>`).join('');
+    el('picks').hidden = !hits.length;
+    el('note').textContent = q && !exact ? (hits.length ? 'Pick one from the list, or keep typing to add your own.' : `"${item.name.trim()}" is not in the list. Set its attenuation below.`) : '';
+    if (exact) el('picks').querySelector('.on')?.scrollIntoView({ block: 'nearest' });
+  };
+  const adopt = hit => {
+    Object.assign(item, { name: hit.name, lab: hit.lab, form: hit.form, attenuation: hit.attenuation });
+    el('lab').value = hit.lab; el('form').value = hit.form; el('att').value = hit.attenuation;
+  };
+  dlg.addEventListener('input', e => {
+    const t = e.target, numOr = v => (v === '' ? null : parseFloat(v));
+    if (t === el('name')) { item.name = t.value; const hit = byName(YEASTS, t.value); if (hit) adopt(hit); drawPicks(); }
+    else if (t === el('amount')) item.amount = numOr(t.value);
+    else if (t === el('att')) item.attenuation = numOr(t.value);
+    else if (t === el('lab')) item.lab = t.value;
+    else if (t === el('form')) item.form = t.value;
+  });
+  dlg.addEventListener('click', e => {
+    const pick = e.target.closest('.pick');
+    if (pick) { adopt(byName(YEASTS, pick.dataset.n)); el('name').value = item.name; drawPicks(); el('amount').focus(); el('amount').select(); return; }
+    if (e.target.closest('[data-x]') || e.target === dlg) dlg.close();
+  });
+  dlg.querySelector('form').addEventListener('submit', e => {
+    e.preventDefault();
+    item.name = item.name.trim();
+    item.lab = (item.lab || '').trim();
+    if (!item.name) { el('note').textContent = 'Give the yeast a name first.'; el('name').focus(); return; }
+    if (!(item.attenuation > 0 && item.attenuation <= 100)) { el('note').textContent = 'Attenuation must be between 1 and 100 %.'; el('att').focus(); return; }
+    if (editing) recipe.yeasts[index] = item; else (recipe.yeasts ??= []).push(item);
+    dlg.close();
+    done();
+  });
+  dlg.addEventListener('close', () => dlg.remove());
+  drawPicks();
+  dlg.showModal();
+  if (editing) { el('amount').focus(); el('amount').select(); } else el('name').focus();
+}
+
+// Popup for adding an "other addition" (index null) or editing one: finings, nutrients, spices and so on.
+// Types are the BeerJSON ones. Only boil additions have a time; the brew-day timer counts down to them.
+const MISC_TYPES = ['fining', 'spice', 'herb', 'flavor', 'wood', 'water agent', 'other'];
+const MISC_USES = [['mash', 'Mash'], ['boil', 'Boil'], ['fermentation', 'Fermenter'], ['package', 'Packaging']];
+function miscDialog(recipe, index, done) {
+  const editing = index != null;
+  const item = editing ? clone(recipe.miscs[index]) : { name: '', type: 'other', amount: 1, unit: 'g', use: 'boil', time: 10 };
+  const types = MISC_TYPES.includes(item.type) ? MISC_TYPES : [...MISC_TYPES, item.type];
+  document.querySelector('dialog.sheet')?.remove();
+  const dlg = document.createElement('dialog');
+  dlg.className = 'sheet';
+  dlg.innerHTML = `<form novalidate>
+    <div class="sec-head"><h2>${editing ? 'Edit addition' : 'Add addition'}</h2><button type="button" class="icon-btn" data-x aria-label="Close">×</button></div>
+    <label class="fld" for="md-name"><span>Name</span><input id="md-name" autocomplete="off" placeholder="For example Irish moss" value="${esc(item.name)}"></label>
+    <p class="hint" id="md-note" role="status"></p>
+    <div class="row">
+      <label class="fld" for="md-amount"><span>Amount</span><input id="md-amount" type="number" step="any" min="0" inputmode="decimal" value="${esc(item.amount ?? '')}"></label>
+      <label class="fld" for="md-unit"><span>Unit</span><select id="md-unit">${['g', 'ml', 'each'].map(u => `<option${u === (item.unit || 'g') ? ' selected' : ''}>${u}</option>`).join('')}</select></label>
+    </div>
+    <div class="row" id="md-timing"></div>
+    <div class="row"><label class="fld" for="md-type"><span>Type</span><select id="md-type">${types.map(t => `<option${t === (item.type || 'other') ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label></div>
+    <div class="foot-actions">
+      <button type="submit" class="btn primary">${editing ? 'Done' : 'Add to recipe'}</button>
+      <button type="button" class="btn" data-x>Cancel</button>
+    </div></form>`;
+  document.body.append(dlg);
+  const el = id => dlg.querySelector('#md-' + id);
+  const drawTiming = () => {
+    el('timing').innerHTML = `<label class="fld" for="md-use"><span>Added</span><select id="md-use">${MISC_USES.map(([v, t]) => `<option value="${v}"${v === item.use ? ' selected' : ''}>${t}</option>`).join('')}</select></label>` +
+      (item.use === 'boil' ? `<label class="fld" for="md-time"><span>Minutes from the end</span><input id="md-time" type="number" step="5" min="0" inputmode="decimal" value="${esc(item.time ?? '')}"></label>` : '');
+  };
+  dlg.addEventListener('input', e => {
+    const t = e.target, numOr = v => (v === '' ? null : parseFloat(v));
+    if (t === el('name')) item.name = t.value;
+    else if (t === el('amount')) item.amount = numOr(t.value);
+    else if (t === el('unit')) item.unit = t.value;
+    else if (t === el('type')) item.type = t.value;
+    else if (t.id === 'md-time') item.time = numOr(t.value);
+    else if (t.id === 'md-use') { item.use = t.value; if (item.use === 'boil' && item.time == null) item.time = 10; drawTiming(); el('use').focus(); }
+  });
+  dlg.addEventListener('click', e => { if (e.target.closest('[data-x]') || e.target === dlg) dlg.close(); });
+  dlg.querySelector('form').addEventListener('submit', e => {
+    e.preventDefault();
+    item.name = item.name.trim();
+    if (!item.name) { el('note').textContent = 'Give the addition a name first.'; el('name').focus(); return; }
+    if (item.use !== 'boil') delete item.time; else if (!Number.isFinite(item.time)) item.time = 0;
+    if (editing) recipe.miscs[index] = item; else (recipe.miscs ??= []).push(item);
+    dlg.close();
+    done();
+  });
+  dlg.addEventListener('close', () => dlg.remove());
+  drawTiming();
   dlg.showModal();
   if (editing) { el('amount').focus(); el('amount').select(); } else el('name').focus();
 }
@@ -647,21 +779,6 @@ function recipeView(id) {
     doc: r,
     touch() { r.modified = today(); store.touch('recipes', id); },
     update,
-    change(t) {
-      const list = t.dataset.p?.split('.')[0];
-      if (t.dataset.autofill) {
-        const [, i] = t.dataset.p.split('.');
-        const hit = byName({ fermentables: FERMENTABLES, hops: HOPS, yeasts: YEASTS }[t.dataset.autofill], t.value);
-        if (hit) { Object.assign(r[list][i], hit); ctx.touch(); renderList(list); update(); }
-      } else if (t.dataset.rerender) {
-        const h = r.hops[t.dataset.p.split('.')[1]];
-        if (h.use === 'dry hop' && !(h.time <= 14)) h.time = 4;
-        if (h.use === 'whirlpool') { if (!(h.time <= 60)) h.time = 20; h.temp ??= 80; }
-        if (h.use === 'boil' && h.time == null) h.time = 60;
-        renderList('hops');
-        update();
-      }
-    },
     actions: {
       ...listActions,
       save: () => commit('recipes', id),
@@ -701,6 +818,10 @@ function recipeView(id) {
       },
       'add-hop': () => hopDialog(r, null, () => { ctx.touch(); renderList('hops'); update(); }),
       'edit-hop': btn => hopDialog(r, +btn.dataset.i, () => { ctx.touch(); renderList('hops'); update(); }),
+      'add-yeast': () => yeastDialog(r, null, () => { ctx.touch(); renderList('yeasts'); update(); }),
+      'edit-yeast': btn => yeastDialog(r, +btn.dataset.i, () => { ctx.touch(); renderList('yeasts'); update(); }),
+      'add-misc': () => miscDialog(r, null, () => { ctx.touch(); renderList('miscs'); update(); }),
+      'edit-misc': btn => miscDialog(r, +btn.dataset.i, () => { ctx.touch(); renderList('miscs'); update(); }),
       // Rescale every ingredient so OG and IBU stay put on the chosen profile's batch size and efficiency.
       fit() {
         const eq = equipFor(r), before = C.recipeStats(r, eq);
@@ -1538,7 +1659,7 @@ timer.on((kind, payload) => {
 
 function datalists() {
   const dl = (id, items) => `<datalist id="${id}">${items.map(x => `<option value="${esc(x.name)}">`).join('')}</datalist>`;
-  document.body.insertAdjacentHTML('beforeend', dl('dl-ferm', FERMENTABLES) + dl('dl-hop', HOPS) + dl('dl-yeast', YEASTS) + dl('dl-style', STYLES));
+  document.body.insertAdjacentHTML('beforeend', dl('dl-style', STYLES));
 }
 
 store.init();

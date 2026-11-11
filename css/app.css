@@ -434,3 +434,7 @@ svg.radar.malt .ring { stroke: rgb(74 52 14 / .35); stroke-width: 5; }
 #storage .foot-actions { margin-top: 12px; }
 #storage .foot-actions.alt { padding-top: 12px; border-top: 1.5px dashed var(--line); }
 #storage .summary { border-top: 0; padding-top: 0; }
+
+/* Yeast rows: a ring filled to the yeast's attenuation. */
+svg.radar.yeast .ring { stroke: var(--line); stroke-width: 14; }
+svg.radar.yeast .shape { fill: none; stroke: var(--gold-deep); stroke-width: 14; stroke-linejoin: miter; }
