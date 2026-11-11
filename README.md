@@ -217,17 +217,26 @@ phosphoric) for your target pH. It is a simple charge-balance estimate, good to 
 
 ## Wireless hydrometer (iSpindel)
 
-A brew log can pull gravity readings from an iSpindel that posts to a ThingSpeak channel.
-Enter the channel ID on the brew's Hydrometer card (and the channel's Read API key if it
-is private). Gyle fetches the readings for the brew's dates and keeps one per hour in the
-brew file. It also says when gravity has held steady for two days.
+Gyle reads gravity from an iSpindel that posts to a ThingSpeak channel.
+
+1. Go to **Settings → Devices** and press **Add device**.
+2. Enter a name, the channel ID and, for a private channel, the Read API key.
+3. Press **Test**. Gyle shows the latest reading and which fields hold gravity and temperature.
+4. On a brew log, choose the device on the Hydrometer card.
+
+Gyle then fetches the readings from the brew date to the packaged date and keeps one per hour
+in the brew log. While a brew is fermenting or conditioning, Gyle fetches new readings each
+time you open it. It also says when gravity has held steady for two days. Plato readings are
+converted to SG. `js/sources.js` is where other reading sources can be added.
+
+The read key is kept in the browser and never saved to the repo or your account. Enter it
+again on each phone or computer that you use. Gyle leaves out a reading that is more than
+10 points above the lowest reading before it. That reading comes from after the iSpindel
+left the beer.
 
 The Hydrometer card draws the readings as two charts on one time scale: gravity, and
 temperature below it. Your own readings show as dots. To read one hour, touch or hover
-over a chart, or focus it and use the arrow keys. Gyle leaves out a reading that is more than 10 points above the lowest reading
-before it. That reading comes from after the iSpindel left the beer.
-The read key is kept in the browser and never committed. Plato readings are
-converted to SG. `js/sources.js` is where other reading sources can be added.
+over a chart, or focus it and use the arrow keys.
 
 ## Importing
 

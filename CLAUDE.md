@@ -79,9 +79,16 @@ A brew log has `timeline: [{ id, t, text, stage?, photo?: { id, w, h } }]` (`t` 
 the clip, so a photo file is removed only when neither uses it (`forgetPhoto()` in `brewView`).
 `notesToTimeline()` moves the dated notes of older Brewfather imports into the timeline.
 
+### Hydrometer devices
+
+`settings.devices: [{ id, name, type: 'thingspeak', channel, gravityField, tempField }]`, edited
+in Settings → Devices. A brew stores `deviceId` and its hourly `deviceReadings`. The ThingSpeak
+read key is in localStorage only, as `gyle.tskey.<channel>`. Brews from before devices existed
+held `device: { channel, … }`. `adoptOldDevice()` turns that into a settings device on open.
+
 ### Settings document
 
-`settings/settings` holds `profiles` + `defaultProfile` (equipment), `waters` + `defaultWater`,
+`settings/settings` holds `profiles` + `defaultProfile` (equipment), `waters` + `defaultWater`, `devices`,
 and `brewOrder` (the draggable brew queue: recipe ids, next brew first). `queued()` sorts by
 status first (ready, planning, archived) and by `brewOrder` inside each status, so the list draws
 one draggable group per status. `setStatus()` changes every version of a recipe and moves it to the
@@ -124,7 +131,7 @@ Gyle gives 0 IBU to 0-minute boil hops. Brewfather gives them some, so imported 
 
 1. **Supabase**: Stuart is creating an account. Next: run `setup.sql`, set the Auth Site URL to `https://shaslam.github.io/gyle/`, sign up in the app, fix whatever breaks. Then put the project URL and public key in `js/config.js`.
 2. **Repos**: GitHub Pages only serves public repos on the free plan, so the app repo is public. If he keeps using git storage, data goes in a separate private repo set in Settings.
-3. **iSpindel**: stock firmware. He needs to check whether its Service Type list offers ThingSpeak; if not, reflash to GravityMon. Then link a real channel on a brew log.
+3. **iSpindel**: stock firmware. He needs to check whether its Service Type list offers ThingSpeak; if not, reflash to GravityMon. Then add it in Settings → Devices and choose it on a brew log.
 4. **Token trust**: he found a pasted GitHub token stored in localStorage "dodgy". Proper "Sign in with GitHub" needs a small server-side function to hold a client secret; parked as too much for now. The cheap hardening is done: `index.html` has a Content-Security-Policy meta tag that limits connections to GitHub, `*.supabase.co` and ThingSpeak, and the fonts are served from `fonts/`. A new outside service, or a self-hosted Supabase, needs its host added to `connect-src`.
 5. **Offered but not built**: RO-water dilution in the Water card; moving a recipe to the bottom of the brew queue when a brew is started from it; an SRM-first display setting; sparge-water acidification.
 

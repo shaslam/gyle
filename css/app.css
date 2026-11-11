@@ -609,3 +609,7 @@ dialog.photo-view .caption { margin: 10px 0 0; font-size: 14px; }
 .subnav { margin: 0 0 14px; }
 .subnav .seg { text-decoration: none; }
 .subnav .seg:not(.on) { background: rgb(255 250 240 / .55); border-color: var(--wall-deep); color: var(--ink); }
+
+/* Brew page: the device picker and its fetch button on one line. */
+.dev-row { align-items: flex-end; margin-top: 14px; }
+.dev-row .btn { margin-bottom: 2px; }

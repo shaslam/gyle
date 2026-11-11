@@ -28,21 +28,39 @@ with sync_playwright() as p:
     pg.route('https://api.thingspeak.com/**', handle)
     U='http://localhost:8765/'
     msg = lambda: pg.inner_text('#sec-device [role=status]')
-    pg.goto(U); pg.wait_for_timeout(1300); pg.goto(U+'#recipe/house-pale-ale'); pg.wait_for_timeout(1200)
+    dmsg = lambda: pg.inner_text('#devices [role=status]')
+    pg.goto(U); pg.wait_for_timeout(1300)
+    # Settings -> Devices: set up the iSpindel once.
+    pg.goto(U+'#settings/devices'); pg.wait_for_timeout(400)
+    print('devices page:', pg.inner_text('#devices'))
+    pg.click('[data-act=add-device]'); pg.wait_for_timeout(200)
+    pg.click('[data-act=dev-test]'); pg.wait_for_timeout(200); print('no channel:', dmsg())
+    pg.fill('#f-devices-0-channel','999'); pg.click('[data-act=dev-test]'); pg.wait_for_timeout(500); print('bad channel:', dmsg())
+    pg.fill('#f-devices-0-channel','123'); pg.click('[data-act=dev-test]'); pg.wait_for_timeout(500); print('no key:', dmsg())
+    pg.fill('#dv-key-0','SECRET'); pg.click('[data-act=dev-test]'); pg.wait_for_timeout(600); print('test ok:', dmsg())
+    print('field picks:', pg.eval_on_selector_all('#devices select','o=>o.map(s=>s.id+"="+s.value+" ("+s.options.length+" options)")'))
+    settings = pg.evaluate("JSON.parse(localStorage.getItem('gyle.cache.v1')).settings.settings.data")
+    print('device saved:', settings.get('devices'), '| key in settings:', 'SECRET' in json.dumps(settings))
+    # A brew picks the device.
+    pg.goto(U+'#recipe/house-pale-ale'); pg.wait_for_timeout(1200)
     pg.click('[data-act=brew]'); pg.wait_for_timeout(400)
     pg.fill('#f-brewDate', (now - datetime.timedelta(days=6)).strftime('%Y-%m-%d')); pg.fill('#f-measured-og','1.051')
-    pg.click('[data-act=dev-fetch]'); pg.wait_for_timeout(200); print('no channel:', msg())
-    pg.fill('#dev-channel','999'); pg.click('[data-act=dev-fetch]'); pg.wait_for_timeout(400); print('bad channel:', msg())
-    pg.fill('#dev-channel','123'); pg.click('[data-act=dev-fetch]'); pg.wait_for_timeout(400); print('no key:', msg())
-    pg.fill('#dev-key','SECRET'); pg.click('[data-act=dev-fetch]'); pg.wait_for_timeout(600); print('ok:', msg())
+    print('picker:', pg.eval_on_selector_all('#dev-pick option','o=>o.map(x=>x.textContent)'), '| count:', pg.inner_text('#sec-device .count'))
+    pg.select_option('#dev-pick', label='iSpindel'); pg.wait_for_timeout(700); print('ok:', msg())
     print('url:', seen[-1][:140])
     print('head:', pg.inner_text('#sec-device .count'), '| summary:', pg.inner_text('#sec-device .summary').replace('\n',' | '))
     print('pva FG row:', pg.inner_text('#pva tbody tr:nth-child(3)').replace('\t',' '), '| abv:', pg.inner_text('#pva tbody tr:nth-child(4)').replace('\t',' '))
     print('chart hint:', pg.inner_text('#dev-chart .hint'), '| panels:', pg.locator('#dev-chart svg').count(), '| readout:', pg.inner_text('#dev-chart .readout'), '| save:', pg.inner_text('#save-btn'))
     stored = pg.evaluate("JSON.parse(localStorage.getItem('gyle.cache.v1')).brews"); bid=list(stored)[0]
     pg.wait_for_timeout(600); stored = pg.evaluate("JSON.parse(localStorage.getItem('gyle.cache.v1')).brews"); d=stored[bid]['data']
-    print('saved device:', d.get('device'), '| n:', len(d.get('deviceReadings',[])), '| first/last:', d['deviceReadings'][0], d['deviceReadings'][-1], '| key in brew file:', 'SECRET' in json.dumps(d))
+    print('saved deviceId:', d.get('deviceId'), '| old device field:', d.get('device'), '| n:', len(d.get('deviceReadings',[])), '| first/last:', d['deviceReadings'][0], d['deviceReadings'][-1], '| key in brew file:', 'SECRET' in json.dumps(d))
     pg.locator('#sec-device').scroll_into_view_if_needed(); pg.evaluate("window.scrollBy(0,-70)"); pg.wait_for_timeout(200); None
     pg.locator('#dev-chart').scroll_into_view_if_needed(); pg.wait_for_timeout(200); None
     pg.select_option('#f-status','fermenting'); n0=len(seen); pg.reload(); pg.wait_for_timeout(1500); print('auto-fetch on open:', len(seen)-n0, '|', msg())
+    # A brew linked before devices existed (channel stored on the brew) gets a device of its own.
+    bid0 = pg.evaluate('location.hash'); pg.wait_for_timeout(800); pg.goto(U+'README.md')  # outside the app, so it cannot write its copy back
+    pg.evaluate("""()=>{const c=JSON.parse(localStorage.getItem('gyle.cache.v1'));const s=c.settings.settings.data;s.devices=[];const b=c.brews[Object.keys(c.brews)[0]].data;delete b.deviceId;b.device={type:'thingspeak',channel:'456',gravityField:'4',tempField:''};localStorage.setItem('gyle.cache.v1',JSON.stringify(c))}""")
+    pg.goto(U+bid0); pg.wait_for_timeout(1200)
+    c = pg.evaluate("JSON.parse(localStorage.getItem('gyle.cache.v1'))"); bd = list(c['brews'].values())[0]['data']
+    print('old link moved:', c['settings']['settings']['data'].get('devices'), '| brew deviceId:', bd.get('deviceId'), '| brew device field gone:', 'device' not in bd, '| picker:', pg.eval_on_selector('#dev-pick','s=>s.selectedOptions[0].textContent'))
     print('overflow', pg.evaluate('document.documentElement.scrollWidth > innerWidth'), errs); b.close()

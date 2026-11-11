@@ -1576,6 +1576,31 @@ function brewsView() {
   if (dayItems.some(x => x.date)) { drawDays(); new ResizeObserver(() => bd.isConnected && drawDays()).observe(bd); }
 }
 
+// ---------- hydrometer devices ----------
+// Devices live in the settings document (Settings → Devices). A ThingSpeak read key is kept in
+// this browser only, by channel, so it never reaches the repo or the account.
+const tsKeyName = ch => 'gyle.tskey.' + ch;
+const tsKey = ch => { try { return (ch && localStorage.getItem(tsKeyName(ch))) || ''; } catch { return ''; } };
+const setTsKey = (ch, k) => { try { if (!ch) return; if (k) localStorage.setItem(tsKeyName(ch), k); else localStorage.removeItem(tsKeyName(ch)); } catch { /* not remembered */ } };
+const devicesList = () => store.get('settings', 'settings')?.devices || [];
+const agoText = t => { const h = (Date.now() - Date.parse(t)) / 36e5; return h < 1 ? 'under an hour ago' : h < 48 ? `${Math.round(h)} hours ago` : `${Math.round(h / 24)} days ago`; };
+// Brews linked before devices existed hold the channel themselves. Make (or find) the matching
+// device and link the brew to it instead.
+function adoptOldDevice(b) {
+  if (!b.device?.channel || b.deviceId) return false;
+  const st = clone(store.get('settings', 'settings') || {});
+  st.devices ??= [];
+  let d = st.devices.find(x => String(x.channel) === String(b.device.channel));
+  if (!d) {
+    d = { id: 'd-' + uid(), name: `iSpindel (channel ${b.device.channel})`, type: 'thingspeak', channel: String(b.device.channel), gravityField: b.device.gravityField || '', tempField: b.device.tempField || '' };
+    st.devices.push(d);
+    store.put('settings', 'settings', st);
+  }
+  b.deviceId = d.id;
+  delete b.device;
+  return true;
+}
+
 // Brews imported from Brewfather before the timeline existed keep their dated notes as text
 // ("2025-01-20 (Fermenting): Krausen up", one per paragraph). Move them into the timeline.
 function notesToTimeline(id, b) {
@@ -1595,7 +1620,7 @@ function brewView(id) {
   const b = store.get('brews', id);
   if (!b) return notFound('brew', '#brews');
   b.measured ??= {}; b.checklist ??= {}; b.readings ??= [];
-  if (notesToTimeline(id, b)) store.touch('brews', id);
+  if (notesToTimeline(id, b) | adoptOldDevice(b)) store.touch('brews', id);
   const r = b.recipe, eq = b.equipment || equipFor(r), plan = C.recipeStats(r, eq), steps = brewSteps(r, eq);
   ctx = {
     doc: b,
@@ -1615,6 +1640,12 @@ function brewView(id) {
     ref: () => store.get('brews', id),
     change(t) {
       if (t.id === 't-wake') timer.setWake(t.checked);
+      else if (t.id === 'dev-pick') {
+        if (t.value) b.deviceId = t.value; else delete b.deviceId;
+        deviceMsg = '';
+        ctx.touch(); drawDevice();
+        if (b.deviceId) fetchDevice();
+      }
       else if (t.id === 'tl-file') { addPhotos([...t.files]); t.value = ''; }
       else if (t.id === 'clip-file') { setClip(t.files[0]); t.value = ''; }
       else if (t.dataset.tl === 't') drawTimeline();
@@ -1653,30 +1684,23 @@ function brewView(id) {
       + `<span class="rate-num">${rating ? `${rating} / 5` : 'Not rated'}</span>`;
   }
 
-  // ---- wireless hydrometer (iSpindel via ThingSpeak) ----
-  // The channel number is saved with the brew. The read key stays in this browser only, so it is never committed.
-  const keyName = () => 'gyle.tskey.' + (b.device?.channel || '');
-  const readKey = () => { try { return localStorage.getItem(keyName()) || ''; } catch { return ''; } };
-  let deviceMsg = '', deviceFields = null, fetching = false;
-  let typedChannel = b.device?.channel || '', typedKey = readKey(); // what is in the boxes, kept across redraws
+  // ---- wireless hydrometer: a device from Settings → Devices ----
+  let deviceMsg = '', fetching = false;
   function drawDevice() {
     const el = $('#sec-device');
     if (!el) return;
-    const d = b.device || {}, list = b.deviceReadings || [], latest = list.at(-1);
-    const ago = t => { const h = (Date.now() - Date.parse(t)) / 36e5; return h < 1 ? 'under an hour ago' : h < 48 ? `${Math.round(h)} hours ago` : `${Math.round(h / 24)} days ago`; };
-    const fieldPick = (id, label, value) => `<label class="fld" for="${id}"><span>${label}</span><select id="${id}"><option value="">Auto</option>${Object.entries(deviceFields || {}).map(([k, name]) => `<option value="${k}"${String(value) === k ? ' selected' : ''}>${k}: ${esc(name)}</option>`).join('')}</select></label>`;
-    el.innerHTML = `<div class="sec-head"><h2>Hydrometer</h2><span class="count">${list.length ? `${list.length} hourly readings` : 'not linked'}</span></div>
+    const devs = devicesList(), dev = devs.find(d => d.id === b.deviceId), list = b.deviceReadings || [], latest = list.at(-1);
+    el.innerHTML = `<div class="sec-head"><h2>Hydrometer</h2><span class="count">${list.length ? `${list.length} hourly readings` : dev ? 'no readings yet' : 'no device'}</span></div>
       <div id="dev-chart"></div>
-      <p class="hint">Link an iSpindel that posts to a ThingSpeak channel. Gyle pulls its readings for this brew's dates and keeps one per hour in the brew log.</p>
-      <div class="row">
-        <label class="fld" for="dev-channel"><span>Channel ID</span><input id="dev-channel" inputmode="numeric" autocomplete="off" value="${esc(typedChannel)}"></label>
-        <label class="fld w-name" for="dev-key"><span>Read key (blank if public)</span><input id="dev-key" type="password" autocomplete="off" value="${esc(typedKey)}"></label>
-      </div>
-      ${deviceFields ? `<div class="row">${fieldPick('dev-gf', 'Gravity field', d.gravityField)}${fieldPick('dev-tf', 'Temperature field', d.tempField)}</div>` : ''}
-      <div class="foot-actions"><button type="button" class="btn primary" data-act="dev-fetch"${fetching ? ' disabled' : ''}>${fetching ? 'Fetching…' : list.length ? 'Fetch latest' : 'Link and fetch'}</button>
-        ${d.channel ? '<button type="button" class="btn danger" data-act="dev-unlink">Unlink</button>' : ''}</div>
-      ${latest ? `<div class="summary"><span>Latest <b>${sg(latest.sg)}</b>${latest.temp != null ? ` at <b>${n(latest.temp)} °C</b>` : ''}, ${ago(latest.t)}</span>${latest.battery != null ? `<span>Battery <b>${n(latest.battery, 2)} V</b></span>` : ''}
+      ${devs.length || b.deviceId ? `<div class="row dev-row">
+          <label class="fld w-name" for="dev-pick"><span>Device</span><select id="dev-pick"><option value="">None</option>${devs.map(d => `<option value="${esc(d.id)}"${d.id === b.deviceId ? ' selected' : ''}>${esc(d.name || 'Unnamed device')}</option>`).join('')}${b.deviceId && !dev ? `<option value="${esc(b.deviceId)}" selected>A deleted device</option>` : ''}</select></label>
+          ${dev ? `<button type="button" class="btn primary" data-act="dev-fetch"${fetching ? ' disabled' : ''}>${fetching ? 'Fetching…' : 'Fetch readings'}</button>` : ''}
+        </div>
+        <p class="hint">Gyle fetches the device's readings from the brew date to the packaged date and keeps one per hour in this brew log.</p>`
+        : '<p class="hint">To bring in gravity readings from an iSpindel, add it in <a href="#settings/devices">Settings → Devices</a>, then choose it here.</p>'}
+      ${latest ? `<div class="summary"><span>Latest <b>${sg(latest.sg)}</b>${latest.temp != null ? ` at <b>${n(latest.temp)} °C</b>` : ''}, ${agoText(latest.t)}</span>${latest.battery != null ? `<span>Battery <b>${n(latest.battery, 2)} V</b></span>` : ''}
         ${stableFor(inBeer(list)) ? '<span class="stable">Stable for 2 days: likely finished</span>' : ''}</div>` : ''}
+      ${list.length ? '<div class="tl-actions"><button type="button" class="link-btn danger" data-act="dev-clear">Clear the readings</button></div>' : ''}
       <p class="hint" role="status">${esc(deviceMsg)}</p>`;
     drawDeviceChart();
   }
@@ -1693,37 +1717,29 @@ function brewView(id) {
     ch?.wire(el);
   }
   async function fetchDevice(quiet = false) {
-    typedChannel = ($('#dev-channel')?.value ?? typedChannel).trim();
-    typedKey = ($('#dev-key')?.value ?? typedKey).trim();
-    const channel = typedChannel;
-    if (!channel) { deviceMsg = 'Enter the channel ID first.'; return drawDevice(); }
-    const device = { type: 'thingspeak', channel, gravityField: $('#dev-gf')?.value || b.device?.gravityField || '', tempField: $('#dev-tf')?.value || b.device?.tempField || '' };
-    const key = typedKey;
+    const dev = devicesList().find(d => d.id === b.deviceId);
+    if (!dev) return;
+    if (!dev.channel) { deviceMsg = `${dev.name || 'This device'} has no channel ID. Set it in Settings → Devices.`; return drawDevice(); }
     const from = b.brewDate ? new Date(b.brewDate + 'T00:00:00') : null;
     const to = b.packagedDate ? new Date(b.packagedDate + 'T23:59:59') : null;
     fetching = true; deviceMsg = ''; drawDevice();
     try {
-      const out = await fetchThingSpeak(device, key, from, to);
-      deviceFields = out.fields;
-      b.device = device;
-      try { key ? localStorage.setItem('gyle.tskey.' + channel, key) : localStorage.removeItem('gyle.tskey.' + channel); } catch { /* key just is not remembered */ }
+      const out = await fetchThingSpeak(dev, tsKey(dev.channel), from, to);
       const changed = JSON.stringify(b.deviceReadings || []) !== JSON.stringify(out.readings);
       if (changed) { b.deviceReadings = out.readings; ctx.touch(); }
-      deviceMsg = out.readings.length ? `Fetched ${out.raw} readings${b.brewDate ? ` since ${b.brewDate}` : ''}.${changed ? ' They are saved with this brew log.' : ' Nothing new.'}` : `The channel has no gravity readings${b.brewDate ? ` since ${b.brewDate}` : ''} yet.`;
+      deviceMsg = out.readings.length ? `Fetched ${out.raw} readings${b.brewDate ? ` since ${b.brewDate}` : ''}.${changed ? ' They are saved with this brew log.' : ' Nothing new.'}` : `The device has no gravity readings${b.brewDate ? ` since ${b.brewDate}` : ''} yet.`;
     } catch (e) {
-      if (e.fields) deviceFields = e.fields;
-      if (!quiet || b.deviceReadings?.length) deviceMsg = e.message;
+      if (!quiet || b.deviceReadings?.length) deviceMsg = `${e.message} Check the device in Settings → Devices.`;
     }
     fetching = false;
     drawDevice(); update();
   }
   Object.assign(ctx.actions, {
     'dev-fetch': () => fetchDevice(),
-    'dev-unlink'(btn) {
-      if (!confirmTap(btn, 'Tap again to unlink')) return;
-      try { localStorage.removeItem(keyName()); } catch { /* nothing stored */ }
-      delete b.device; delete b.deviceReadings;
-      deviceMsg = 'Unlinked. The readings were removed from this brew.'; deviceFields = null; typedChannel = ''; typedKey = '';
+    'dev-clear'(btn) {
+      if (!confirmTap(btn, 'Tap again to clear the readings')) return;
+      delete b.deviceReadings;
+      deviceMsg = 'The readings were removed from this brew log.';
       ctx.touch(); drawDevice(); update();
     },
   });
@@ -1962,7 +1978,7 @@ function brewView(id) {
   drawTimer();
   drawDevice();
   // While a brew is fermenting, pull new hydrometer readings each time its log is opened.
-  if (b.device?.channel && ['fermenting', 'conditioning'].includes(b.status)) fetchDevice(true);
+  if (devicesList().some(d => d.id === b.deviceId) && ['fermenting', 'conditioning'].includes(b.status)) fetchDevice(true);
 }
 
 // ---------- brew sheet ----------
@@ -2169,7 +2185,8 @@ const EQUIP_LABELS = {
 
 let storageNote = ''; // a message to show on the Storage card the next time Settings is drawn
 // Settings has one page per subject. The tab bar's Settings link opens the first one.
-const SETTINGS_PAGES = [['equipment', 'Equipment'], ['water', 'Water'], ['storage', 'Storage']];
+const SETTINGS_PAGES = [['equipment', 'Equipment'], ['water', 'Water'], ['devices', 'Devices'], ['storage', 'Storage']];
+const deviceFieldsSeen = {}, deviceNotes = {}; // per device id, kept while the app is open: ThingSpeak field names, the last test result
 function settingsView(sub) {
   const page = SETTINGS_PAGES.some(([k]) => k === sub) ? sub : 'equipment';
   const doc = clone(store.get('settings', 'settings') || {});
@@ -2177,6 +2194,7 @@ function settingsView(sub) {
   doc.defaultProfile = defaultProfile().id;
   delete doc.equipment; // older single-profile settings become the first profile
   doc.waters ??= [];
+  doc.devices ??= [];
   const val = id => ($('#' + id)?.value ?? '').trim();
   const touch = () => store.put('settings', 'settings', doc);
   const drawProfiles = () => {
@@ -2203,11 +2221,45 @@ function settingsView(sub) {
     </div>`).join('') : '<p class="empty">No water profiles yet. Recipes start from RO or distilled water until you add your own.</p>';
     saveState('settings', 'settings');
   };
+  const drawDevices = () => {
+    const el = $('#devices');
+    if (!el) return;
+    const used = id => store.list('brews').filter(x => x.data.deviceId === id).length;
+    el.innerHTML = doc.devices.length ? doc.devices.map((d, i) => {
+      const seen = deviceFieldsSeen[d.id];
+      const pick = (key, label) => {
+        const opts = seen || (d[key] ? { [d[key]]: `field ${d[key]}` } : {});
+        return `<label class="fld" for="dv-${key}-${i}"><span>${label}</span><select id="dv-${key}-${i}" data-p="devices.${i}.${key}"><option value="">Work it out</option>${Object.entries(opts).map(([k, name]) => `<option value="${esc(k)}"${String(d[key] || '') === k ? ' selected' : ''}>${esc(k)}: ${esc(name)}</option>`).join('')}</select></label>`;
+      };
+      const u = used(d.id);
+      return `<div class="profile">
+        <div class="row">${field({ label: 'Device name', cls: 'w-name' }, `devices.${i}.name`, d.name)}</div>
+        <div class="row">${field({ label: 'ThingSpeak channel ID' }, `devices.${i}.channel`, d.channel)}
+          <label class="fld w-name" for="dv-key-${i}"><span>Read API key (blank if public)</span><input id="dv-key-${i}" type="password" autocomplete="off" data-dev-key="${i}" value="${esc(tsKey(d.channel))}"></label></div>
+        ${seen || d.gravityField || d.tempField ? `<div class="row">${pick('gravityField', 'Gravity field')}${pick('tempField', 'Temperature field')}</div>` : ''}
+        <p class="hint" role="status">${esc(deviceNotes[d.id] || '')}</p>
+        <div class="profile-foot"><span class="count">${u ? `${u} brew${u === 1 ? '' : 's'}` : 'No brews yet'}</span>
+          <button type="button" class="btn small" data-act="dev-test" data-i="${i}">Test</button>
+          <button type="button" class="btn small danger" data-act="drop-device" data-i="${i}">Delete</button></div>
+      </div>`;
+    }).join('') : '<p class="empty">No devices yet.</p>';
+    saveState('settings', 'settings');
+  };
   ctx = {
     doc,
     touch,
+    // The read key is not a settings field: it is kept in this browser, by channel.
+    raw(t) {
+      if (t.dataset.devKey == null) return;
+      const d = doc.devices[+t.dataset.devKey];
+      if (d) setTsKey(d.channel, t.value.trim());
+    },
     refresh: () => saveState('settings', 'settings'),
-    update: () => saveState('settings', 'settings'),
+    // A changed channel ID takes the key in its box along with it.
+    update() {
+      doc.devices.forEach((d, i) => { const k = $(`#dv-key-${i}`); if (k) setTsKey(d.channel, k.value.trim()); });
+      saveState('settings', 'settings');
+    },
     actions: {
       save: () => commit('settings', 'settings'),
       'add-water'() {
@@ -2215,6 +2267,37 @@ function settingsView(sub) {
         doc.waters.push(w);
         doc.defaultWater ??= w.id;
         touch(); drawWaters();
+      },
+      'add-device'() {
+        doc.devices.push({ id: 'd-' + uid(), name: doc.devices.length ? 'New device' : 'iSpindel', type: 'thingspeak', channel: '', gravityField: '', tempField: '' });
+        touch(); drawDevices();
+        $(`#f-devices-${doc.devices.length - 1}-name`)?.focus();
+      },
+      async 'dev-test'(btn) {
+        const i = +btn.dataset.i, d = doc.devices[i];
+        if (!d) return;
+        const key = ($(`#dv-key-${i}`)?.value || '').trim();
+        setTsKey(d.channel, key);
+        if (!String(d.channel || '').trim()) { deviceNotes[d.id] = 'Enter the channel ID first.'; return drawDevices(); }
+        deviceNotes[d.id] = 'Testing…'; drawDevices();
+        try {
+          const out = await fetchThingSpeak(d, key, new Date(Date.now() - 7 * 864e5), null);
+          deviceFieldsSeen[d.id] = out.fields;
+          const last = out.readings.at(-1);
+          deviceNotes[d.id] = last
+            ? `Working. Latest gravity ${sg(last.sg)}${last.temp != null ? ` at ${n(last.temp)} °C` : ''}, ${agoText(last.t)}. Gravity is field ${out.used.gravity}${out.used.temp ? `, temperature field ${out.used.temp}` : ''}.`
+            : 'Connected, but the channel has no gravity readings from the last 7 days.';
+        } catch (e) {
+          if (e.fields) deviceFieldsSeen[d.id] = e.fields;
+          deviceNotes[d.id] = e.message;
+        }
+        drawDevices();
+      },
+      'drop-device'(b) {
+        if (!confirmTap(b, 'Tap again to delete')) return;
+        doc.devices.splice(+b.dataset.i, 1);
+        touch(); drawDevices();
+        toast('Device deleted. Brews keep the readings they already have.');
       },
       'default-water'(b) { doc.defaultWater = doc.waters[+b.dataset.i].id; touch(); drawWaters(); },
       'drop-water'(b) {
@@ -2375,6 +2458,11 @@ function settingsView(sub) {
       <div id="waters"></div>
       <div class="foot-actions"><button type="button" class="btn" data-act="add-water">Add water profile</button></div>
     </section>`,
+    devices: `<section class="card"><div class="sec-head"><h2>Hydrometer devices</h2></div>
+      <p class="hint">An iSpindel that posts to a ThingSpeak channel. Add it here once, then choose it on each brew log to bring in its gravity readings. The read key is kept in this browser only, so enter it on each device you use.</p>
+      <div id="devices"></div>
+      <div class="foot-actions"><button type="button" class="btn" data-act="add-device">Add device</button></div>
+    </section>`,
     storage: `<section class="card"><div class="sec-head"><h2>Storage</h2></div>
       <p class="hint">Where your recipes, brew logs and settings are kept. Whichever you choose, this browser keeps a working copy so Gyle still works offline.</p>
       <div id="storage"></div>
@@ -2386,6 +2474,7 @@ function settingsView(sub) {
     ${pages[page]}`;
   drawProfiles();
   drawWaters();
+  drawDevices();
   drawStorage();
 }
 
