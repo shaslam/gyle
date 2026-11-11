@@ -109,7 +109,7 @@ and the Show menu filters the list by status.
 
 ## Versions and new recipes
 
-To change a recipe and keep its name, press **New version** on the recipe. The new version
+To change a recipe and keep its name, press **New version** under the recipe's name. The new version
 starts as a copy and gets the next number. The old version stays as it was, so brews made
 from it still show what you brewed. You can say what will change, and the note shows under
 **Packaging & notes**.
@@ -121,7 +121,9 @@ the brew queue.
 
 To start a different beer from an existing one, press **New recipe from this**, or
 **New recipe** on the recipe list and choose a recipe under "Start from". The new recipe
-must have a name of its own. It starts as a copy at version 1 and links back to the
+must have a name of its own: no two recipes can share a name, except the versions of one
+recipe. Renaming a version renames all its versions, and an imported recipe whose name is
+already in use gets a number added ("Best Bitter 2"). It starts as a copy at version 1 and links back to the
 recipe it was based on.
 
 ## Brew sheets

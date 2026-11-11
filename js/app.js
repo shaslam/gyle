@@ -598,6 +598,18 @@ const vName = r => (versionOf(r) > 1 ? `${r.name} v${versionOf(r)}` : r.name);
 function versionsOf(family) {
   return store.list('recipes').filter(x => familyOf(x.id, x.data) === family).sort((a, b) => versionOf(a.data) - versionOf(b.data));
 }
+// Recipe names are unique: only the versions of one recipe share a name.
+const nameKey = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+const nameTaken = (name, exceptFamily = null) =>
+  store.list('recipes').some(x => familyOf(x.id, x.data) !== exceptFamily && nameKey(x.data.name) === nameKey(name));
+// A free name based on `name`: "Name", then "Name 2", "Name 3" and so on.
+function freeName(name) {
+  const base = String(name || '').trim() || 'Untitled';
+  let out = base, i = 2;
+  while (nameTaken(out)) out = `${base} ${i++}`;
+  return out;
+}
+
 // The newest version of each recipe: what the recipe list and the brew picker show.
 function latestOnly(list) {
   const best = new Map();
@@ -647,7 +659,7 @@ function newRecipeDialog(baseId = '') {
     const name = dlg.querySelector('#nr-name').value.trim(), from = dlg.querySelector('#nr-base').value, src = from && store.get('recipes', from);
     const note = dlg.querySelector('#nr-note');
     if (!name) { note.textContent = 'Give the recipe a name.'; dlg.querySelector('#nr-name').focus(); return false; }
-    if (store.list('recipes').some(x => x.data.name.trim().toLowerCase() === name.toLowerCase())) {
+    if (nameTaken(name)) {
       note.textContent = `There is already a recipe called ${name}. Choose another name, or open that recipe and make a new version of it.`;
       dlg.querySelector('#nr-name').focus();
       return false;
@@ -820,12 +832,16 @@ function recipesView() {
 }
 
 async function importFiles(files) {
-  const added = [];
+  const added = [], renamed = [];
   for (const file of files) {
     try {
       const text = decodeXmlBytes(await file.arrayBuffer());
       const recipes = text.trimStart().startsWith('<') ? parseBeerXML(text) : fromBeerJSON(JSON.parse(text));
       for (const r of recipes) {
+        const wanted = r.name;
+        r.name = freeName(wanted);
+        if (r.name !== wanted) renamed.push(`${wanted} as ${r.name}`);
+        for (const k of ['family', 'version', 'versionNote']) delete r[k]; // an import starts its own recipe
         const id = `${slug(r.name)}-${uid()}`;
         r.modified = today();
         store.put('recipes', id, r);
@@ -836,7 +852,7 @@ async function importFiles(files) {
     }
   }
   if (!added.length) return;
-  toast(`Imported ${added.length} recipe${added.length > 1 ? 's' : ''}.`);
+  toast(`Imported ${added.length} recipe${added.length > 1 ? 's' : ''}.${renamed.length ? ` Some names were already in use, so these were renamed: ${renamed.join('; ')}.` : ''}`);
   if (added.length === 1) location.hash = '#recipe/' + added[0]; else ctx.refresh?.();
 }
 
@@ -864,15 +880,16 @@ function versionBar(id, r) {
   const all = versionsOf(familyOf(id, r)), latest = all.at(-1);
   const based = r.basedOn && (store.get('recipes', r.basedOn.id)
     ? `<a href="#recipe/${esc(r.basedOn.id)}">${esc(vName(r.basedOn))}</a>` : esc(vName(r.basedOn)));
-  const parts = [];
-  if (all.length > 1) {
-    parts.push(`<span class="v-list" aria-label="Versions">${all.map(x => x.id === id
-      ? `<b aria-current="page">v${versionOf(x.data)}</b>` : `<a href="#recipe/${x.id}" title="${esc(x.data.versionNote || '')}">v${versionOf(x.data)}</a>`).join('')}</span>`);
-  }
+  const list = all.length ? all : [{ id, data: r }];
+  const parts = [
+    `<span class="v-list" aria-label="Versions">${list.map(x => x.id === id
+      ? `<b aria-current="page">v${versionOf(x.data)}</b>` : `<a href="#recipe/${x.id}" title="${esc(x.data.versionNote || '')}">v${versionOf(x.data)}</a>`).join('')}</span>`,
+    '<button type="button" class="btn small ghost" data-act="new-version">New version</button>',
+  ];
   if (based) parts.push(`<span>Based on ${based}</span>`);
   const old = latest && latest.id !== id
     ? `<p class="v-old">This is version ${versionOf(r)}. The newest is <a href="#recipe/${latest.id}">version ${versionOf(latest.data)}</a>.</p>` : '';
-  return parts.length || old ? `<div class="v-bar">${parts.join('')}</div>${old}` : '';
+  return `<div class="v-bar">${parts.join('')}</div>${old}`;
 }
 
 function recipeView(id) {
@@ -881,6 +898,25 @@ function recipeView(id) {
   ctx = {
     doc: r,
     touch() { r.modified = today(); store.touch('recipes', id); },
+    // The name is checked as you type and only kept when no other recipe uses it.
+    // All versions of this recipe take the new name.
+    raw(t) {
+      if (t.id !== 'f-name') return;
+      const name = t.value.trim(), family = familyOf(id, r), err = $('#name-err');
+      const problem = !name ? 'A recipe needs a name.' : nameTaken(name, family) ? `There is already a recipe called ${name}.` : '';
+      err.textContent = problem;
+      t.toggleAttribute('aria-invalid', !!problem);
+      ctx.nameBefore ??= r.name; // what to go back to if the typing ends on a refused name
+      if (!problem) rename(name);
+    },
+    change(t) {
+      if (t.id !== 'f-name') return;
+      if (t.hasAttribute('aria-invalid')) rename(ctx.nameBefore ?? r.name);
+      t.value = r.name;
+      ctx.nameBefore = undefined;
+      $('#name-err').textContent = '';
+      t.removeAttribute('aria-invalid');
+    },
     update,
     actions: {
       ...listActions,
@@ -942,13 +978,27 @@ function recipeView(id) {
     ref: () => store.get('recipes', id),
   };
 
+  // All versions of this recipe share its name.
+  function rename(name) {
+    if (name === r.name) return;
+    for (const v of versionsOf(familyOf(id, r))) {
+      if (v.id === id) continue;
+      const doc = store.get('recipes', v.id);
+      doc.name = name; doc.modified = today(); store.touch('recipes', v.id);
+    }
+    r.name = name;
+    ctx.touch();
+    update();
+  }
+
   view.innerHTML = `
     <div class="page-head"><a class="back" href="#recipes">← Recipes</a>
       <div class="actions"><button type="button" class="btn ghost" id="revert-btn" data-act="revert" hidden>Discard changes</button><button type="button" class="btn primary" id="save-btn" data-act="save"></button></div>
     </div>
     <section class="label-card">
       <div class="label-main"><span class="overline" id="hero-over"></span>
-        <label class="title-fld" for="f-name"><span class="sr">Recipe name</span><input id="f-name" class="title-input" data-p="name" value="${esc(r.name)}"></label>
+        <label class="title-fld" for="f-name"><span class="sr">Recipe name</span><input id="f-name" class="title-input" value="${esc(r.name)}" aria-describedby="name-err"></label>
+        <p class="name-err" id="name-err" role="status"></p>
         ${versionBar(id, r)}
         <div class="segs status" id="status-toggle" role="group" aria-label="Recipe status"></div></div>
       <div class="label-art" id="hero-art"></div>
@@ -974,7 +1024,6 @@ function recipeView(id) {
     <div class="foot-actions">
       <button type="button" class="btn primary" data-act="brew">Brew this recipe</button>
       <a class="btn" href="#sheet/${id}">Brew sheet</a>
-      <button type="button" class="btn" data-act="new-version">New version</button>
       <button type="button" class="btn" data-act="new-from">New recipe from this</button>
       <button type="button" class="btn" data-act="export-json">Export BeerJSON</button>
       <button type="button" class="btn" data-act="export-xml">Export BeerXML</button>

@@ -440,7 +440,7 @@ svg.radar.yeast .ring { stroke: var(--line); stroke-width: 14; }
 svg.radar.yeast .shape { fill: none; stroke: var(--gold-deep); stroke-width: 14; stroke-linejoin: miter; }
 
 /* ---- recipe versions ---- */
-.v-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+.v-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; font-size: 13px; color: var(--muted); }
 .v-bar a { color: var(--warn); font-weight: 600; }
 .v-list { display: flex; gap: 2px; }
 .v-list a, .v-list b { font: 500 12px/1 var(--font-mono); padding: 5px 7px; border-radius: 999px; text-decoration: none; }
@@ -492,3 +492,8 @@ svg.radar.yeast .shape { fill: none; stroke: var(--gold-deep); stroke-width: 14;
   .bs-stats > div { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .bs-check li, .bs-table tr { break-inside: avoid; }
 }
+
+/* Recipe name refused because another recipe uses it. */
+.name-err { margin: 6px 0 0; font-size: 13px; font-weight: 600; color: var(--red); }
+.name-err:empty { display: none; }
+.title-input[aria-invalid] { border-bottom-color: var(--red); }
