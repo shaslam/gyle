@@ -845,13 +845,15 @@ function recipesView() {
       : [...all].sort((a, b) => (b.data.modified || '').localeCompare(a.data.modified || '') || a.data.name.localeCompare(b.data.name));
     const want = st => recipeShow === 'all' || (recipeShow === 'queue' ? st !== 'archived' : st === recipeShow);
     shown = sorted.filter(({ data }) => (!q || `${data.name} ${data.style}`.toLowerCase().includes(q)) && want(statusOf(data)));
-    const whole = !q && recipeShow === 'queue';
-    const canDrag = recipeSort === 'queue' && whole && shown.length > 1;
-    const nextId = queued(all).find(x => isReady(x.data))?.id; // the first ready recipe in the queue is the next brew
-    const archivedCount = all.filter(x => statusOf(x.data) === 'archived').length;
+    const inQueue = queued(all).filter(x => statusOf(x.data) !== 'archived');
+    const place = new Map(inQueue.map((x, i) => [x.id, i])); // queue numbers stay the same whatever is shown
+    const nextId = inQueue.find(x => isReady(x.data))?.id; // the first ready recipe in the queue is the next brew
+    const archivedHidden = recipeShow !== 'all' && recipeShow !== 'archived' ? all.filter(x => statusOf(x.data) === 'archived').length : 0;
+    const showsQueue = recipeShow !== 'archived' && shown.some(x => statusOf(x.data) !== 'archived');
     $('#queue-hint').textContent = recipeSort !== 'queue' || !all.length ? ''
-      : !whole ? (recipeShow === 'archived' ? 'Archived recipes are out of the brew queue. Restore one to put it back at the bottom.' : 'Show "Ready and planning" with no search to reorder the queue.')
-      : shown.length > 1 ? `Your brew queue: ready recipes first, then those in planning. Drag a handle to reorder. ${nextId ? 'The first ready recipe is next.' : 'Nothing is flagged ready to brew yet.'}${archivedCount ? ` ${archivedCount} archived recipe${archivedCount > 1 ? 's are' : ' is'} not shown.` : ''}` : '';
+      : q ? (showsQueue ? 'Clear the search to reorder the queue.' : '')
+      : recipeShow === 'archived' ? 'Archived recipes are out of the brew queue. Restore one to put it back at the bottom.'
+      : showsQueue ? `Your brew queue: ready recipes first, then those in planning. Drag a handle to reorder within a group. ${nextId ? 'The first ready recipe is next.' : 'Nothing is flagged ready to brew yet.'}${archivedHidden ? ` ${archivedHidden} archived recipe${archivedHidden > 1 ? 's are' : ' is'} not shown.` : ''}` : '';
     // Archiving many at once: filter the list by status or a search first.
     const archivable = shown.filter(x => statusOf(x.data) !== 'archived').length;
     $('#bulk').innerHTML = archivable > 1 && (q || recipeShow === 'planning' || recipeShow === 'ready')
@@ -861,12 +863,14 @@ function recipesView() {
         : `<div class="empty-state"><h2>No recipes yet</h2><p>Start a new recipe, or import BeerXML or BeerJSON files exported from BeerSmith or Brewfather, or a Brewfather backup.${store.connected ? '' : ' Choose where to keep them in Settings.'}</p></div>`}</div>`;
       return;
     }
-    if (!canDrag) { $('#recipe-list').innerHTML = `<div class="list">${shown.map((x, i) => row(x, i, false, nextId)).join('')}</div>`; return; }
-    // The queue in two groups, each reordered on its own: ready first, then in planning.
-    const groups = [['ready', 'Ready to brew'], ['planning', 'In planning']].map(([st, title]) => ({ st, title, items: shown.filter(x => statusOf(x.data) === st) })).filter(g => g.items.length);
-    let at = 0;
-    $('#recipe-list').innerHTML = groups.map(g => `<h2 class="q-head on-wall">${g.title}</h2><div class="list" data-group="${g.st}">${g.items.map(x => row(x, at++, g.items.length > 1, nextId)).join('')}</div>`).join('');
-    for (const g of groups) {
+    if (recipeSort !== 'queue') { $('#recipe-list').innerHTML = `<div class="list">${shown.map(x => row(x, 0, false, nextId)).join('')}</div>`; return; }
+    // The queue, one group per status. Ready and planning groups can be reordered on their own
+    // when there is no search (a search hides rows, and a drag must see the whole group).
+    const groups = [['ready', 'Ready to brew'], ['planning', 'In planning'], ['archived', 'Archived']]
+      .map(([st, title]) => ({ st, title, items: shown.filter(x => statusOf(x.data) === st) })).filter(g => g.items.length);
+    const drag = g => !q && g.st !== 'archived' && g.items.length > 1;
+    $('#recipe-list').innerHTML = groups.map(g => `<h2 class="q-head on-wall">${g.title}</h2><div class="list" data-group="${g.st}">${g.items.map(x => row(x, place.get(x.id) ?? 0, drag(g), nextId)).join('')}</div>`).join('');
+    for (const g of groups.filter(drag)) {
       enableReorder($(`#recipe-list [data-group="${g.st}"]`), (from, to) => {
         const ids = g.items.map(x => x.id);
         ids.splice(to, 0, ids.splice(from, 1)[0]);
