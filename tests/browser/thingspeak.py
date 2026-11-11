@@ -38,11 +38,11 @@ with sync_playwright() as p:
     print('url:', seen[-1][:140])
     print('head:', pg.inner_text('#sec-device .count'), '| summary:', pg.inner_text('#sec-device .summary').replace('\n',' | '))
     print('pva FG row:', pg.inner_text('#pva tbody tr:nth-child(3)').replace('\t',' '), '| abv:', pg.inner_text('#pva tbody tr:nth-child(4)').replace('\t',' '))
-    print('chart hint:', pg.inner_text('#chart .hint'), '| save:', pg.inner_text('#save-btn'))
+    print('chart hint:', pg.inner_text('#dev-chart .hint'), '| panels:', pg.locator('#dev-chart svg').count(), '| readout:', pg.inner_text('#dev-chart .readout'), '| save:', pg.inner_text('#save-btn'))
     stored = pg.evaluate("JSON.parse(localStorage.getItem('gyle.cache.v1')).brews"); bid=list(stored)[0]
     pg.wait_for_timeout(600); stored = pg.evaluate("JSON.parse(localStorage.getItem('gyle.cache.v1')).brews"); d=stored[bid]['data']
     print('saved device:', d.get('device'), '| n:', len(d.get('deviceReadings',[])), '| first/last:', d['deviceReadings'][0], d['deviceReadings'][-1], '| key in brew file:', 'SECRET' in json.dumps(d))
     pg.locator('#sec-device').scroll_into_view_if_needed(); pg.evaluate("window.scrollBy(0,-70)"); pg.wait_for_timeout(200); None
-    pg.locator('#chart').scroll_into_view_if_needed(); pg.wait_for_timeout(200); None
+    pg.locator('#dev-chart').scroll_into_view_if_needed(); pg.wait_for_timeout(200); None
     pg.select_option('#f-status','fermenting'); n0=len(seen); pg.reload(); pg.wait_for_timeout(1500); print('auto-fetch on open:', len(seen)-n0, '|', msg())
     print('overflow', pg.evaluate('document.documentElement.scrollWidth > innerWidth'), errs); b.close()

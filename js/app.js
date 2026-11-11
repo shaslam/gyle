@@ -1315,6 +1315,97 @@ function readingsChart(readings, og, targetFg, device = []) {
   </svg><p class="hint">${[targetFg ? `Dashed line: target FG ${sg(targetFg)}.` : '', auto.length > 1 ? `Line: hydrometer${manual.length ? '; dots: your own readings' : ''}.` : ''].filter(Boolean).join(' ')}</p>`;
 }
 
+// The hydrometer chart: gravity, and temperature below it on the same time scale (two charts,
+// not two y-scales on one). Pointer or arrow keys move a crosshair over both and fill the readout.
+// `device` is hourly readings { t, sg, temp }, `typed` the brew's own readings (shown as dots).
+function deviceChart(device, typed, og, targetFg) {
+  const pts = device.map(r => ({ t: Date.parse(r.t), sg: +r.sg, temp: Number.isFinite(r.temp) ? +r.temp : null })).filter(p => !Number.isNaN(p.t) && p.sg > 0.9);
+  if (pts.length < 2) return null;
+  const manual = (typed || []).filter(x => x.date && x.sg > 0.9).map(x => ({ t: Date.parse(x.date), sg: +x.sg })).filter(p => !Number.isNaN(p.t));
+  const W = 340, L = 46, R = 12, t0 = Math.min(pts[0].t, ...manual.map(p => p.t)), t1 = Math.max(pts.at(-1).t, ...manual.map(p => p.t));
+  const x = t => L + (t - t0) / Math.max(1, t1 - t0) * (W - L - R);
+  const days = (t1 - t0) / 864e5, dStep = days <= 8 ? 1 : days <= 16 ? 2 : days <= 40 ? 7 : 14;
+  const dayTicks = []; for (let d = 0; d <= days + 1e-9; d += dStep) dayTicks.push(d);
+  const path = (list, y, f) => list.filter(p => p[f] != null).map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p[f]).toFixed(1)}`).join(' ');
+
+  // One panel: horizontal gridlines with labels, day ticks, the line, a crosshair dot.
+  const panel = (cls, H, lo, hi, step, fmt, f, extra = '', label = '') => {
+    const T = label ? 20 : 8, B = 20, y = v => T + (hi - v) / (hi - lo) * (H - T - B), grid = [];
+    for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + 1e-9; v += step) grid.push(v);
+    const line = path(pts, y, f);
+    return { y, svg: `<svg class="dchart ${cls}" viewBox="0 0 ${W} ${H}" aria-hidden="true">
+      ${grid.map(v => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"/><text x="${L - 6}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end">${fmt(v)}</text>`).join('')}
+      ${dayTicks.map(d => `<text x="${x(t0 + d * 864e5).toFixed(1)}" y="${H - 5}" text-anchor="middle">${d === 0 ? 'day 0' : d}</text>`).join('')}
+      ${extra ? extra(y) : ''}
+      <path class="area" d="${line} L${x(pts.at(-1).t).toFixed(1)},${H - B} L${x(pts[0].t).toFixed(1)},${H - B} Z"/>
+      <path class="line" d="${line}"/>
+      ${label ? `<text class="ptitle" x="${L}" y="11">${label}</text>` : ''}
+      <line class="xh" x1="0" x2="0" y1="${T}" y2="${H - B}" visibility="hidden"/><circle class="xh-dot" r="4.5" visibility="hidden"/>
+    </svg>` };
+  };
+
+  const sgs = pts.map(p => p.sg).concat(manual.map(p => p.sg));
+  let hi = Math.max(og || 0, ...sgs) + 0.002, lo = Math.min(targetFg || 2, ...sgs) - 0.002;
+  const sgStep = hi - lo > 0.05 ? 0.01 : 0.005;
+  hi = Math.ceil(hi / sgStep) * sgStep; lo = Math.floor(lo / sgStep) * sgStep;
+  const g = panel('grav', 182, lo, hi, sgStep, v => v.toFixed(3), 'sg', y => `
+    ${targetFg ? `<line class="target" x1="${L}" x2="${W - R}" y1="${y(targetFg).toFixed(1)}" y2="${y(targetFg).toFixed(1)}"/>` : ''}
+    ${manual.map(p => `<circle class="pt" cx="${x(p.t).toFixed(1)}" cy="${y(p.sg).toFixed(1)}" r="4"/>`).join('')}`, 'Gravity');
+
+  const temps = pts.map(p => p.temp).filter(v => v != null);
+  let t = null;
+  if (temps.length > 1) {
+    const tlo0 = Math.min(...temps), thi0 = Math.max(...temps), tStep = thi0 - tlo0 > 12 ? 5 : thi0 - tlo0 > 5 ? 2 : 1;
+    t = panel('temp', 108, Math.floor((tlo0 - 0.5) / tStep) * tStep, Math.ceil((thi0 + 0.5) / tStep) * tStep, tStep, v => `${v}°`, 'temp', null, 'Temperature °C');
+  }
+  const first = pts[0], last = pts.at(-1);
+  const summary = `Gravity from ${sg(first.sg)} to ${sg(last.sg)} over ${Math.round(days)} days${og ? `, ${n(C.abv(og, last.sg), 1)} % ABV` : ''}.`;
+  const html = `<div class="dchart-wrap" tabindex="0" role="img" aria-label="${summary} Use the left and right arrow keys to read each hour.">
+      <p class="readout" aria-live="polite"></p>${g.svg}${t ? t.svg : ''}</div>
+    <p class="hint">${[targetFg ? `Dashed line: target FG ${sg(targetFg)}.` : '', manual.length ? 'Dots: your own readings.' : '', 'Touch or hover over the chart to read a value.'].filter(Boolean).join(' ')}</p>`;
+
+  // Fill the readout for reading i (or the latest one), and place the crosshair.
+  function wire(root) {
+    const wrap = root.querySelector('.dchart-wrap');
+    if (!wrap) return;
+    const out = wrap.querySelector('.readout');
+    const when = p => new Date(p.t).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const text = p => `Day ${Math.floor((p.t - t0) / 864e5)}, ${when(p)}: <b>${sg(p.sg)}</b>${p.temp != null ? ` · <b>${n(p.temp, 1)} °C</b>` : ''}${og && og > p.sg ? ` · ${n(C.abv(og, p.sg), 1)} % ABV so far` : ''}`;
+    let at = -1;
+    function show(i) {
+      at = i;
+      const p = pts[i] || last;
+      out.innerHTML = (i < 0 ? 'Latest. ' : '') + text(p);
+      for (const [svg, panelInfo, f] of [[wrap.querySelector('.grav'), g, 'sg'], [wrap.querySelector('.temp'), t, 'temp']]) {
+        if (!svg) continue;
+        const xh = svg.querySelector('.xh'), dot = svg.querySelector('.xh-dot'), vis = i < 0 ? 'hidden' : 'visible';
+        xh.setAttribute('visibility', vis); xh.setAttribute('x1', x(p.t)); xh.setAttribute('x2', x(p.t));
+        dot.setAttribute('visibility', vis && p[f] != null ? vis : 'hidden');
+        if (p[f] != null) { dot.setAttribute('cx', x(p.t)); dot.setAttribute('cy', panelInfo.y(p[f])); }
+      }
+    }
+    const nearest = clientX => {
+      const box = wrap.querySelector('svg').getBoundingClientRect();
+      const tt = t0 + ((clientX - box.left) / box.width * W - L) / (W - L - R) * (t1 - t0);
+      let best = 0;
+      pts.forEach((p, i) => { if (Math.abs(p.t - tt) < Math.abs(pts[best].t - tt)) best = i; });
+      return best;
+    };
+    wrap.addEventListener('pointermove', e => show(nearest(e.clientX)));
+    wrap.addEventListener('pointerdown', e => show(nearest(e.clientX)));
+    wrap.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') show(-1); });
+    wrap.addEventListener('keydown', e => {
+      const step = { ArrowLeft: -1, ArrowRight: 1, PageUp: -24, PageDown: 24, Home: -1e9, End: 1e9 }[e.key];
+      if (!step) return;
+      e.preventDefault();
+      show(Math.max(0, Math.min(pts.length - 1, (at < 0 ? pts.length - 1 : at) + step)));
+    });
+    wrap.addEventListener('blur', () => show(-1));
+    show(-1);
+  }
+  return { html, wire };
+}
+
 // Timed parts of a brew day: each mash step, the boil with its additions, each whirlpool stand.
 function timerSegments(r) {
   const segs = [];
@@ -1429,6 +1520,7 @@ function brewView(id) {
     const ago = t => { const h = (Date.now() - Date.parse(t)) / 36e5; return h < 1 ? 'under an hour ago' : h < 48 ? `${Math.round(h)} hours ago` : `${Math.round(h / 24)} days ago`; };
     const fieldPick = (id, label, value) => `<label class="fld" for="${id}"><span>${label}</span><select id="${id}"><option value="">Auto</option>${Object.entries(deviceFields || {}).map(([k, name]) => `<option value="${k}"${String(value) === k ? ' selected' : ''}>${k}: ${esc(name)}</option>`).join('')}</select></label>`;
     el.innerHTML = `<div class="sec-head"><h2>Hydrometer</h2><span class="count">${list.length ? `${list.length} hourly readings` : 'not linked'}</span></div>
+      <div id="dev-chart"></div>
       <p class="hint">Link an iSpindel that posts to a ThingSpeak channel. Gyle pulls its readings for this brew's dates and keeps one per hour in the brew log.</p>
       <div class="row">
         <label class="fld" for="dev-channel"><span>Channel ID</span><input id="dev-channel" inputmode="numeric" autocomplete="off" value="${esc(typedChannel)}"></label>
@@ -1440,6 +1532,19 @@ function brewView(id) {
       ${latest ? `<div class="summary"><span>Latest <b>${sg(latest.sg)}</b>${latest.temp != null ? ` at <b>${n(latest.temp)} °C</b>` : ''}, ${ago(latest.t)}</span>${latest.battery != null ? `<span>Battery <b>${n(latest.battery, 2)} V</b></span>` : ''}
         ${stableFor(inBeer(list)) ? '<span class="stable">Stable for 2 days: likely finished</span>' : ''}</div>` : ''}
       <p class="hint" role="status">${esc(deviceMsg)}</p>`;
+    drawDeviceChart();
+  }
+  // Redrawn on each edit too, so a new OG or a typed reading shows straight away.
+  let chartKey = '';
+  function drawDeviceChart() {
+    const el = $('#dev-chart');
+    if (!el) return;
+    const key = JSON.stringify([b.deviceReadings?.length, b.deviceReadings?.at(-1), b.measured.og, plan.fg, b.readings]);
+    if (key === chartKey && el.firstChild) return; // unchanged: keep the crosshair where it is
+    chartKey = key;
+    const ch = deviceChart(inBeer(b.deviceReadings), b.readings, b.measured.og, plan.fg);
+    el.innerHTML = ch ? ch.html : '';
+    ch?.wire(el);
   }
   async function fetchDevice(quiet = false) {
     typedChannel = ($('#dev-channel')?.value ?? typedChannel).trim();
@@ -1580,7 +1685,10 @@ function brewView(id) {
     </tbody></table>`;
     $('#done-count').textContent = `${steps.filter((_, i) => b.checklist['s' + i]).length} of ${steps.length} done`;
     const c = $('#chart');
-    if (c) c.innerHTML = readingsChart(b.readings, m.og, plan.fg, inBeer(b.deviceReadings));
+    // With hydrometer data, the Hydrometer card has the chart (with these readings as dots).
+    const hasDevice = inBeer(b.deviceReadings).length > 1;
+    if (c) c.innerHTML = hasDevice ? (b.readings.some(x => x.sg) ? '<p class="hint">Your readings show as dots on the hydrometer chart.</p>' : '') : readingsChart(b.readings, m.og, plan.fg);
+    drawDeviceChart();
     saveState('brews', id);
   }
   update();

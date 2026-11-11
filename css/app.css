@@ -527,3 +527,22 @@ svg.radar.yeast .shape { fill: none; stroke: var(--gold-deep); stroke-width: 14;
 .rate-btn { display: grid; place-items: center; min-width: 44px; min-height: 48px; padding: 0; border: 0; border-radius: 10px; background: none; color: var(--ink); cursor: pointer; }
 .rate-btn:hover .mini-pint.empty { opacity: .7; }
 .rate-num { margin-left: 6px; font: 500 14px/1 var(--font-mono); color: var(--muted); }
+
+/* Hydrometer chart: gravity, then temperature on the same time scale. */
+.dchart-wrap { margin-top: 10px; max-width: 560px; border-radius: 10px; touch-action: pan-y; cursor: crosshair; }
+.readout { min-height: 2.6em; margin: 0 0 4px; font-size: 13px; color: var(--muted); }
+.readout b { font: 500 14px/1 var(--font-mono); color: var(--ink); }
+.dchart { display: block; width: 100%; height: auto; }
+.dchart + .dchart { margin-top: 6px; }
+.dchart text { font: 10px var(--font-mono); fill: var(--muted); }
+.dchart .ptitle { font: 700 10px var(--font-body); font-stretch: 80%; letter-spacing: .08em; text-transform: uppercase; fill: var(--muted); }
+.dchart .grid { stroke: var(--line); stroke-width: 1; }
+.dchart .target { stroke: var(--ok); stroke-width: 1.2; stroke-dasharray: 4 3; }
+.dchart .line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.dchart.grav .line { stroke: var(--gold-deep); }
+.dchart.grav .area { fill: var(--gold); opacity: .22; }
+.dchart.temp .line { stroke: var(--green); }
+.dchart.temp .area { fill: none; }
+.dchart .pt { fill: var(--cream); stroke: var(--ink); stroke-width: 2; }
+.dchart .xh { stroke: var(--ink); stroke-width: 1; opacity: .5; }
+.dchart .xh-dot { fill: var(--ink); stroke: var(--cream); stroke-width: 2; }

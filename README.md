@@ -185,9 +185,12 @@ phosphoric) for your target pH. It is a simple charge-balance estimate, good to 
 
 A brew log can pull gravity readings from an iSpindel that posts to a ThingSpeak channel.
 Enter the channel ID on the brew's Hydrometer card (and the channel's Read API key if it
-is private). Gyle fetches the readings for the brew's dates, keeps one per hour in the
-brew file, draws them on the gravity chart and says when gravity has held steady for two
-days. Gyle leaves out a reading that is more than 10 points above the lowest reading
+is private). Gyle fetches the readings for the brew's dates and keeps one per hour in the
+brew file. It also says when gravity has held steady for two days.
+
+The Hydrometer card draws the readings as two charts on one time scale: gravity, and
+temperature below it. Your own readings show as dots. To read one hour, touch or hover
+over a chart, or focus it and use the arrow keys. Gyle leaves out a reading that is more than 10 points above the lowest reading
 before it. That reading comes from after the iSpindel left the beer.
 The read key is kept in the browser and never committed. Plato readings are
 converted to SG. `js/sources.js` is where other reading sources can be added.
