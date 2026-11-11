@@ -1460,7 +1460,7 @@ const clock = ms => {
 
 // Brew days: one row per year (newest at the top), a dot in the beer's colour on each brew date,
 // so gaps in brewing show at a glance. `items` is [{ id, name, date: 'YYYY-MM-DD', hex }].
-function brewDaysChart(items) {
+function brewDaysChart(items, width = 340) {
   const list = items.filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x.date)).sort((a, b) => a.date.localeCompare(b.date));
   if (!list.length) return null;
   const DAY = 864e5, ms = d => Date.parse(d + 'T12:00:00Z'), now = new Date(), todayStr = today();
@@ -1481,7 +1481,7 @@ function brewDaysChart(items) {
     since > 0 ? `last brew ${span(since)} ago${longest && since > longest.days ? ', the longest gap yet' : ''}` : since === 0 ? 'brewed today' : '',
   ].filter(Boolean);
 
-  const W = 340, L = 34, R = 8, TOP = 16, ROW = 26, y0 = +list[0].date.slice(0, 4), yN = Math.max(now.getFullYear(), +list.at(-1).date.slice(0, 4));
+  const W = Math.max(280, Math.round(width)), L = 34, R = 8, TOP = 16, ROW = 24, y0 = +list[0].date.slice(0, 4), yN = Math.max(now.getFullYear(), +list.at(-1).date.slice(0, 4));
   const years = []; for (let y = yN; y >= y0; y--) years.push(y);
   const H = TOP + years.length * ROW + 4, X = (L + 0), TW = W - L - R;
   const xOf = d => { const y = +d.slice(0, 4), start = Date.UTC(y, 0, 1), end = Date.UTC(y + 1, 0, 1); return X + (ms(d) - start) / (end - start) * TW; };
@@ -1502,9 +1502,9 @@ function brewDaysChart(items) {
   const dots = list.map(x => {
     const y = +x.date.slice(0, 4), cx = xOf(x.date);
     let cy = rowY(y);
-    if (prev && prev.y === y && cx - prev.cx < 11) { flip = -flip; cy += flip * 5; } else flip = 1;
+    if (prev && prev.y === y && cx - prev.cx < 9) { flip = -flip; cy += flip * 4; } else flip = 1;
     prev = { y, cx };
-    return `<a href="#brew/${esc(x.id)}" class="bday" data-i="${list.indexOf(x)}" aria-label="${esc(x.name)}, ${esc(nice(x.date))}"><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6.5" fill="${x.hex}"/></a>`;
+    return `<a href="#brew/${esc(x.id)}" class="bday" data-i="${list.indexOf(x)}" aria-label="${esc(x.name)}, ${esc(nice(x.date))}"><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5" fill="${x.hex}"/><circle class="hit" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="10"/></a>`;
   }).join('');
   const html = `<div class="sec-head"><h2>Brew days</h2></div>
     <p class="bd-facts">${esc(facts.map(f => f[0].toUpperCase() + f.slice(1)).join('. '))}.</p>
@@ -1560,9 +1560,20 @@ function brewsView() {
       </a>`;
     }).join('') : `<div class="empty-state"><h2>No brews logged</h2><p>${recipes.length ? 'Pick a recipe above to start a brew. It keeps a snapshot of the recipe, a brew-day checklist, your measurements and gravity readings.' : 'Create a recipe first, then start a brew from it.'}</p></div>`}</div>`;
   loadPhotos(view);
-  const days = brewDaysChart(brews.map(({ id, data: b }) => ({ id, name: b.name, date: b.brewDate || '', hex: C.srmToHex(C.recipeStats(b.recipe, b.equipment || equipFor(b.recipe)).srm) })));
+  // Drawn at the card's own width, so dots and labels keep one size on a phone and on a wide screen.
+  const dayItems = brews.map(({ id, data: b }) => ({ id, name: b.name, date: b.brewDate || '', hex: C.srmToHex(C.recipeStats(b.recipe, b.equipment || equipFor(b.recipe)).srm) }));
   const bd = $('#brew-days');
-  if (days) { bd.innerHTML = days.html; bd.hidden = false; days.wire(bd); }
+  let drawnWidth = 0;
+  const drawDays = () => {
+    bd.hidden = false;
+    const cs = getComputedStyle(bd), w = bd.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    if (Math.abs(w - drawnWidth) < 2) return;
+    drawnWidth = w;
+    const days = brewDaysChart(dayItems, w);
+    if (!days) { bd.hidden = true; return; }
+    bd.innerHTML = days.html; days.wire(bd);
+  };
+  if (dayItems.some(x => x.date)) { drawDays(); new ResizeObserver(() => bd.isConnected && drawDays()).observe(bd); }
 }
 
 // Brews imported from Brewfather before the timeline existed keep their dated notes as text
