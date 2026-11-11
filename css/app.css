@@ -516,3 +516,14 @@ svg.radar.yeast .shape { fill: none; stroke: var(--gold-deep); stroke-width: 14;
 .name-err { margin: 6px 0 0; font-size: 13px; font-weight: 600; color: var(--red); }
 .name-err:empty { display: none; }
 .title-input[aria-invalid] { border-bottom-color: var(--red); }
+
+/* Brew rating: five small glasses. Filled ones take the beer's colour. */
+.mini-pint { display: block; flex: 0 0 auto; }
+.mini-pint.empty { opacity: .4; }
+.rating { display: flex; gap: 3px; color: var(--ink); }
+.rate-wrap { margin-top: 12px; }
+.rate-label { font: 700 11px/1.2 var(--font-body); font-stretch: 80%; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.rate { display: flex; align-items: center; flex-wrap: wrap; margin: 2px 0 0 -9px; }
+.rate-btn { display: grid; place-items: center; min-width: 44px; min-height: 48px; padding: 0; border: 0; border-radius: 10px; background: none; color: var(--ink); cursor: pointer; }
+.rate-btn:hover .mini-pint.empty { opacity: .7; }
+.rate-num { margin-left: 6px; font: 500 14px/1 var(--font-mono); color: var(--muted); }

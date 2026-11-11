@@ -85,6 +85,17 @@ function pint(hex, width = 34, level = 1, pour = false) {
   </svg>`;
 }
 
+// A small plain glass for ratings: filled with the beer's colour, or empty.
+function miniPint(hex, width) {
+  const glass = 'M9 4h42l-5.2 68.5a4 4 0 0 1-4 3.5H18.2a4 4 0 0 1-4-3.5z';
+  return `<svg class="mini-pint${hex ? '' : ' empty'}" viewBox="0 0 60 82" width="${width}" height="${Math.round(width * 82 / 60)}" aria-hidden="true">
+    ${hex ? `<path d="${glass}" fill="${hex}"/><path d="M9 4h42l-1 13H10z" fill="#fffaf0"/>` : ''}
+    <path d="${glass}" fill="none" stroke="currentColor" stroke-width="5" stroke-linejoin="round"/></svg>`;
+}
+const ratingOf = b => Math.max(0, Math.min(5, Math.round(+b.rating) || 0));
+const ratingPints = (rating, hex, width = 13) =>
+  `<span class="rating" role="img" aria-label="Rated ${rating} out of 5">${[1, 2, 3, 4, 5].map(i => miniPint(i <= rating ? hex : null, width)).join('')}</span>`;
+
 // Two-tap confirmation for destructive buttons: the first tap arms the button, the second does it.
 function confirmTap(b, label) {
   if (b.dataset.armed) return true;
@@ -1346,10 +1357,10 @@ function brewsView() {
       <button type="button" class="btn primary" data-act="new">Start brew</button></div></div>` : ''}
     <div class="list">${brews.length ? brews.map(({ id, data: b, dirty }) => {
       const m = b.measured || {}, last = [...(b.readings || [])].filter(x => x.sg).sort((a, c) => (a.date || '').localeCompare(c.date || '')).at(-1);
-      const fg = m.fg || last?.sg;
+      const fg = m.fg || last?.sg, hex = C.srmToHex(C.recipeStats(b.recipe, b.equipment || equipFor(b.recipe)).srm);
       return `<a class="item" href="#brew/${id}">
-        ${pint(C.srmToHex(C.recipeStats(b.recipe, b.equipment || equipFor(b.recipe)).srm), 34)}
-        <span class="item-main"><strong>${esc(b.name)}</strong><small>${esc(b.brewDate || 'no date')}${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small></span>
+        ${pint(hex, 34)}
+        <span class="item-main"><strong>${esc(b.name)}</strong><small>${esc(b.brewDate || 'no date')}${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small>${ratingOf(b) ? ratingPints(ratingOf(b), hex) : ''}</span>
         <span class="pill s-${b.status.replace(' ', '-')}">${esc(b.status)}</span>
         <span class="item-stats"><span><b>${sg(m.og)}</b> OG</span><span><b>${sg(fg)}</b> SG</span><span><b>${m.og && fg ? n(C.abv(m.og, fg)) : '–'}</b> %</span></span>
       </a>`;
@@ -1388,8 +1399,21 @@ function brewView(id) {
     't-take': () => timer.open(id, b.name, segs, true),
     't-notify': () => timer.askToNotify(),
     't-test': () => timer.test(),
+    rate(btn) {
+      const v = +btn.dataset.v;
+      b.rating = ratingOf(b) === v ? null : v;
+      ctx.touch();
+      drawRating();
+      $(`#rate [data-v="${v}"]`)?.focus();
+    },
   });
   const segs = timerSegments(r);
+
+  function drawRating() {
+    const el = $('#rate'), rating = ratingOf(b), hex = C.srmToHex(plan.srm);
+    if (el) el.innerHTML = [1, 2, 3, 4, 5].map(i => `<button type="button" class="rate-btn" data-act="rate" data-v="${i}" aria-pressed="${i === rating}" aria-label="${i} out of 5">${miniPint(i <= rating ? hex : null, 22)}</button>`).join('')
+      + `<span class="rate-num">${rating ? `${rating} / 5` : 'Not rated'}</span>`;
+  }
 
   // ---- wireless hydrometer (iSpindel via ThingSpeak) ----
   // The channel number is saved with the brew. The read key stays in this browser only, so it is never committed.
@@ -1526,9 +1550,11 @@ function brewView(id) {
     <section class="card"><div class="sec-head"><h2>Notes & tasting</h2></div>
       ${field({ label: 'Brew notes', area: 4, cls: 'block' }, 'notes', b.notes)}
       ${field({ label: 'Tasting notes', area: 4, cls: 'block' }, 'tasting', b.tasting)}
-      <div class="row">${field({ label: 'Rating, 1 to 5', num: 1 }, 'rating', b.rating)}</div></section>
+      <div class="rate-wrap"><span class="rate-label" id="rate-label">Rating</span><div class="rate" id="rate" role="group" aria-labelledby="rate-label"></div>
+        <p class="hint">Tap a glass to rate the beer out of 5. Tap the same glass again to clear the rating.</p></div></section>
     <div class="foot-actions"><a class="btn" href="#sheet/brew/${id}">Brew sheet</a><button type="button" class="btn danger" data-act="delete">Delete brew log</button></div>`;
   renderList('readings');
+  drawRating();
 
   function update() {
     const m = b.measured;
