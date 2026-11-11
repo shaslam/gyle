@@ -8,6 +8,7 @@
 import { toBeerJSON, fromBeerJSON } from './beerjson.js';
 import { GitBackend } from './backend-git.js';
 import { SupabaseBackend } from './backend-supabase.js';
+import { photos } from './photos.js';
 
 const LS_CACHE = 'gyle.cache.v1';
 const LS_MODE = 'gyle.storage.v1';
@@ -81,6 +82,7 @@ class Store {
   wipe() {
     this.docs = { recipes: {}, brews: {}, settings: {} };
     this.owner = 'local';
+    photos.wipe();
     this.persist(); this.#saveMode();
     this.#setStatus(this.connected ? 'idle' : 'local');
   }
@@ -171,6 +173,17 @@ class Store {
       this.#busy = false;
     }
     if (this.dirtyCount) this.#autoSave(500);
+    else if (this.canWrite && this.status.state === 'synced') this.#photos(backend).catch(() => {}); // photos left over from an earlier save
+  }
+
+  // Upload new photos and remove deleted ones. A photo that fails does not stop the documents saving.
+  async #photos(backend) {
+    try {
+      await photos.flush(backend);
+    } catch (e) {
+      this.#setStatus('error', `Photos not saved yet: ${e.message}`);
+      throw e;
+    }
   }
 
   #message(kind, id) {
@@ -204,6 +217,7 @@ class Store {
       }
       this.persist();
       this.#setStatus('synced');
+      await this.#photos(backend).catch(() => {}); // the status shows a photo error; the documents are saved
     } catch (e) {
       this.persist();
       this.#setStatus('error', e.message);

@@ -72,6 +72,7 @@ in the meantime.
 ```
 recipes/<id>.json   one BeerJSON 1.0 document per recipe
 brews/<id>.json     one brew log each, with a snapshot of the recipe as brewed
+photos/<id>.jpg     brew photos (timeline and pump clips)
 settings.json       your equipment profiles (created the first time you commit them)
 js/calc.js          all the brewing maths
 js/data.js          styles, malts, hops and yeasts offered in the editor
@@ -80,6 +81,7 @@ js/beerxml.js       BeerXML import and export
 js/brewfather.js    Brewfather complete backup import
 js/unzip.js         reads zip files (for the Brewfather backup)
 js/store.js         local working copy and syncing
+js/photos.js        brew photos: kept in the browser, saved to the repo or account
 js/backend-git.js   storage backend: GitHub repo
 js/backend-supabase.js  storage backend: Supabase account (sign-in + documents table)
 js/config.js        Supabase project URL and public key
@@ -165,6 +167,31 @@ parts of the app. While the timer runs, the browser tab title shows the time lef
 Browsers stop web pages when the phone is locked, so alerts only fire while the app is
 open: leave "Keep the screen on" ticked on brew day. On iPhone, notifications need the
 app added to the Home Screen first (Share → Add to Home Screen).
+
+## Photos, timeline and pump clip
+
+Each brew log has a Timeline card for photos and notes, grouped by brew day, day 1, day 2
+and so on. Press **Add photos** to add pictures, several at once. On a phone, you can take
+a picture or choose one from the gallery. A photo gets the time of its file, and you can
+change the time. Press **Add note** for a note without a photo. Tap a photo to see it
+full size.
+
+A pump clip is the badge for the beer. It shows at the top of the brew log and on the brew
+list in place of the pint. Press **Add pump clip** to upload one, or press **Pin as the pump
+clip** under a timeline photo.
+
+Gyle makes each photo smaller before it keeps it, to at most 1600 pixels on the long side.
+A photo is usually 150 to 400 kB. The photos are kept in the browser and saved with the brew:
+
+- **This device**: in the browser only.
+- **GitHub repo**: as `photos/<id>.jpg` in the repo. Each photo is one commit, made with the
+  commit of its brew. A public repo makes the photos public. Keep your data in a private repo.
+- **Gyle account**: in Supabase Storage, in a private `photos` bucket. Run
+  `supabase/setup.sql` again to create the bucket. Until you do, the status chip says
+  "Photos not saved yet".
+
+Notes from a Brewfather backup arrive in the timeline. Some brews came in before the timeline
+existed. If you open one of them, Gyle moves its dated notes into the timeline.
 
 ## Hop aroma
 

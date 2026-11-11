@@ -38,14 +38,14 @@ export class GitBackend {
   get ready() { return !!(this.config.owner && this.config.repo); }
   get canWrite() { return this.ready && !!this.config.token; }
 
-  async #api(method, path, body) {
+  async #api(method, path, body, raw = false) {
     const { owner, repo, branch, token } = this.config;
     const url = `${API}/repos/${owner}/${repo}${path}${method === 'GET' && path.startsWith('/contents') ? `?ref=${encodeURIComponent(branch)}` : ''}`;
     let res;
     try {
       res = await fetch(url, {
         method, cache: 'no-store',
-        headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: { Accept: raw ? 'application/vnd.github.raw' : 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch {
@@ -60,7 +60,35 @@ export class GitBackend {
       }[res.status] || `GitHub error ${res.status}: ${detail.message || res.statusText}`;
       throw Object.assign(new Error(msg), { status: res.status });
     }
-    return res.json();
+    return raw ? res.blob() : res.json();
+  }
+
+  // ---- photos: photos/<id>.jpg, one commit each ----
+  async putFile(name, blob) {
+    const content = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(',')[1]);
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(blob);
+    });
+    const path = `/contents/photos/${name}`, { branch } = this.config;
+    try {
+      await this.#api('PUT', path, { message: `Add photo ${name}`, branch, content });
+    } catch (e) {
+      if (e.status !== 422) throw e; // 422: the file is there already (an earlier upload that was not recorded)
+    }
+  }
+  async getFile(name) {
+    return this.#api('GET', `/contents/photos/${name}`, null, true);
+  }
+  async removeFile(name) {
+    const path = `/contents/photos/${name}`;
+    try {
+      const { sha } = await this.#api('GET', path);
+      await this.#api('DELETE', path, { message: `Delete photo ${name}`, sha, branch: this.config.branch });
+    } catch (e) {
+      if (e.status !== 404) throw e; // already gone
+    }
   }
 
   // Check the repo exists and report whether the token can write to it.

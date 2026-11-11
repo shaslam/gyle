@@ -8,6 +8,7 @@ import { fetchThingSpeak, stableFor, inBeer } from './sources.js';
 import { sheetHtml, sheetPdf } from './brewsheet.js';
 import { isBrewfatherBackup, fromBrewfatherBackup } from './brewfather.js';
 import { unzip } from './unzip.js';
+import { photos, shrink, newPhotoId } from './photos.js';
 
 // ---------- helpers ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -95,6 +96,34 @@ function miniPint(hex, width) {
 const ratingOf = b => Math.max(0, Math.min(5, Math.round(+b.rating) || 0));
 const ratingPints = (rating, hex, width = 13) =>
   `<span class="rating" role="img" aria-label="Rated ${rating} out of 5">${[1, 2, 3, 4, 5].map(i => miniPint(i <= rating ? hex : null, width)).join('')}</span>`;
+
+// ---------- photos ----------
+// <img> for a stored photo. loadPhotos() fills in the picture, from this browser or the backend.
+const photoImg = (p, cls, alt) => `<img class="photo${cls ? ' ' + cls : ''}" data-photo="${esc(p.id)}" width="${+p.w || 4}" height="${+p.h || 3}" alt="${esc(alt)}">`;
+function loadPhotos(root) {
+  root.querySelectorAll('img[data-photo]:not([data-loading])').forEach(async img => {
+    img.dataset.loading = '1';
+    const u = await photos.url(img.dataset.photo, store.connected ? store.backend : null);
+    if (u) img.src = u; else img.classList.add('missing');
+  });
+}
+// Every photo a brew log uses, for deleting them with the log.
+const photoIdsOf = b => [...new Set([...(b.timeline || []).map(e => e.photo?.id), b.pumpClip?.id].filter(Boolean))];
+// A time as the value of a datetime-local input, in local time.
+const localStamp = ms => { const d = new Date(ms); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+function photoDialog(pid, caption, when) {
+  document.querySelector('dialog.sheet')?.remove();
+  const dlg = document.createElement('dialog');
+  dlg.className = 'sheet photo-view';
+  const time = when ? new Date(when).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  dlg.innerHTML = `<div class="sec-head"><h2>${esc(time || 'Photo')}</h2><button type="button" class="icon-btn" data-x aria-label="Close">×</button></div>
+    <img class="photo big" data-photo="${esc(pid)}" alt="${esc(caption || 'Brew photo')}">${caption ? `<p class="caption">${esc(caption)}</p>` : ''}`;
+  document.body.append(dlg);
+  dlg.addEventListener('click', e => { if (e.target === dlg || e.target.closest('[data-x]')) dlg.close(); });
+  dlg.addEventListener('close', () => dlg.remove());
+  loadPhotos(dlg);
+  dlg.showModal();
+}
 
 // Two-tap confirmation for destructive buttons: the first tap arms the button, the second does it.
 function confirmTap(b, label) {
@@ -1451,18 +1480,35 @@ function brewsView() {
       const auto = inBeer(b.deviceReadings).at(-1), last = auto && (!typed || auto.t.slice(0, 10) >= (typed.date || '')) ? auto : typed;
       const fg = m.fg || last?.sg, hex = C.srmToHex(C.recipeStats(b.recipe, b.equipment || equipFor(b.recipe)).srm);
       return `<a class="item" href="#brew/${id}">
-        ${pint(hex, 34)}
+        ${b.pumpClip ? `<span class="clip-thumb">${photoImg(b.pumpClip, '', '')}</span>` : pint(hex, 34)}
         <span class="item-main"><strong>${esc(b.name)}</strong><small>${esc(b.brewDate || 'no date')}${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small>${ratingOf(b) ? ratingPints(ratingOf(b), hex) : ''}</span>
         <span class="pill s-${b.status.replace(' ', '-')}">${esc(b.status)}</span>
         <span class="item-stats"><span><b>${sg(m.og)}</b> OG</span><span><b>${sg(fg)}</b> SG</span><span><b>${m.og && fg ? n(C.abv(m.og, fg)) : '–'}</b> %</span></span>
       </a>`;
     }).join('') : `<div class="empty-state"><h2>No brews logged</h2><p>${recipes.length ? 'Pick a recipe above to start a brew. It keeps a snapshot of the recipe, a brew-day checklist, your measurements and gravity readings.' : 'Create a recipe first, then start a brew from it.'}</p></div>`}</div>`;
+  loadPhotos(view);
+}
+
+// Brews imported from Brewfather before the timeline existed keep their dated notes as text
+// ("2025-01-20 (Fermenting): Krausen up", one per paragraph). Move them into the timeline.
+function notesToTimeline(id, b) {
+  if (b.timeline || !id.startsWith('bf-') || !b.notes) return false;
+  const head = /^(\d{4}-\d{2}-\d{2})(?: \(([^)]*)\))?: /;
+  const parts = b.notes.split(/\n\n(?=\d{4}-\d{2}-\d{2}(?: \([^)]*\))?: )/);
+  if (!parts.every(p => head.test(p))) return false;
+  b.timeline = parts.map((p, i) => {
+    const [all, d, stage] = p.match(head);
+    return { id: `${id}-n${i}`, t: `${d}T12:00`, text: p.slice(all.length).trim(), ...(stage ? { stage } : {}) };
+  });
+  b.notes = '';
+  return true;
 }
 
 function brewView(id) {
   const b = store.get('brews', id);
   if (!b) return notFound('brew', '#brews');
   b.measured ??= {}; b.checklist ??= {}; b.readings ??= [];
+  if (notesToTimeline(id, b)) store.touch('brews', id);
   const r = b.recipe, eq = b.equipment || equipFor(r), plan = C.recipeStats(r, eq), steps = brewSteps(r, eq);
   ctx = {
     doc: b,
@@ -1473,13 +1519,26 @@ function brewView(id) {
       save: () => commit('brews', id),
       delete(btn) {
         if (!confirmTap(btn, 'Tap again to delete')) return;
+        photoIdsOf(b).forEach(p => photos.remove(p, store.connected).catch(() => {}));
         store.remove('brews', id);
         location.hash = '#brews';
       },
     },
     refresh: () => saveState('brews', id),
     ref: () => store.get('brews', id),
-    change(t) { if (t.id === 't-wake') timer.setWake(t.checked); },
+    change(t) {
+      if (t.id === 't-wake') timer.setWake(t.checked);
+      else if (t.id === 'tl-file') { addPhotos([...t.files]); t.value = ''; }
+      else if (t.id === 'clip-file') { setClip(t.files[0]); t.value = ''; }
+      else if (t.dataset.tl === 't') drawTimeline();
+    },
+    // Timeline captions, notes and times (not plain data-p fields, because entries are found by id).
+    raw(t) {
+      const e = t.dataset.tl && (b.timeline || []).find(x => x.id === t.dataset.id);
+      if (!e) return;
+      e[t.dataset.tl] = t.value;
+      ctx.touch();
+    },
     timer(kind) { if (kind === 'tick') tickTimer(); else drawTimer(); },
   };
   Object.assign(ctx.actions, {
@@ -1634,7 +1693,7 @@ function brewView(id) {
     <section class="label-card">
       <div class="label-main"><span class="overline">Brew log · ${esc(r.style || 'no style')}</span>
         <label class="title-fld" for="f-name"><span class="sr">Brew name</span><input id="f-name" class="title-input" data-p="name" value="${esc(b.name)}"></label></div>
-      <div class="label-art">${pint(C.srmToHex(plan.srm), 84, 1, true)}<span class="stamp"><b>${n(plan.abv)}</b>% plan</span></div>
+      <div class="label-art" id="label-art"></div>
     </section>
     <section class="card"><div class="row">
       ${field({ label: 'Status', opts: STATUSES }, 'status', b.status)}
@@ -1653,6 +1712,7 @@ function brewView(id) {
       <ol class="steps">${steps.map((s, i) => `<li><label for="st-${i}"><input type="checkbox" id="st-${i}" data-p="checklist.s${i}"${b.checklist['s' + i] ? ' checked' : ''}><span>${esc(s)}</span></label></li>`).join('')}</ol></section>
     <section class="card" id="sec-device"></section>
     <section class="card" id="sec-readings"></section>
+    <section class="card" id="sec-timeline"></section>
     <section class="card"><div class="sec-head"><h2>Notes & tasting</h2></div>
       ${field({ label: 'Brew notes', area: 4, cls: 'block' }, 'notes', b.notes)}
       ${field({ label: 'Tasting notes', area: 4, cls: 'block' }, 'tasting', b.tasting)}
@@ -1661,6 +1721,126 @@ function brewView(id) {
     <div class="foot-actions"><a class="btn" href="#sheet/brew/${id}">Brew sheet</a><button type="button" class="btn danger" data-act="delete">Delete brew log</button></div>`;
   renderList('readings');
   drawRating();
+  drawArt();
+  drawTimeline();
+
+  // ---- pump clip and timeline ----
+  // The pump clip takes the pint's place at the top. It is a photo of its own, or one from the timeline.
+  function drawArt() {
+    const el = $('#label-art');
+    if (!el) return;
+    el.classList.toggle('has-clip', !!b.pumpClip);
+    el.innerHTML = b.pumpClip
+      ? `<button type="button" class="clip-btn" data-act="tl-view" data-photo-id="${b.pumpClip.id}" aria-label="Open the pump clip">${photoImg(b.pumpClip, 'clip-img', `Pump clip for ${b.name}`)}</button>`
+      : `${pint(C.srmToHex(plan.srm), 84, 1, true)}<span class="stamp"><b>${n(plan.abv)}</b>% plan</span>`;
+    loadPhotos(el);
+  }
+  const usedInTimeline = pid => (b.timeline || []).some(e => e.photo?.id === pid);
+  function forgetPhoto(pid) {
+    if (!pid || usedInTimeline(pid) || b.pumpClip?.id === pid) return;
+    photos.remove(pid, store.connected).catch(() => {});
+  }
+  async function keepPhoto(file, max) {
+    const { blob, w, h } = await shrink(file, max);
+    const pid = newPhotoId();
+    await photos.add(pid, blob);
+    return { id: pid, w, h };
+  }
+  async function addPhotos(files) {
+    if (!files.length) return;
+    toast(files.length > 1 ? `Adding ${files.length} photos…` : 'Adding the photo…');
+    let added = 0;
+    for (const f of files) {
+      try {
+        const photo = await keepPhoto(f);
+        (b.timeline ??= []).push({ id: newPhotoId(), t: localStamp(f.lastModified || Date.now()), text: '', photo });
+        added++;
+      } catch (e) { toast(`${f.name}: ${e.message}`, true); }
+    }
+    if (!added) return;
+    ctx.touch(); drawTimeline();
+    toast(added > 1 ? `Added ${added} photos to the timeline.` : 'Added the photo to the timeline.');
+  }
+  async function setClip(file) {
+    if (!file) return;
+    try {
+      const old = b.pumpClip?.id;
+      b.pumpClip = await keepPhoto(file, 1000);
+      forgetPhoto(old);
+      ctx.touch(); drawArt(); drawTimeline();
+    } catch (e) { toast(e.message, true); }
+  }
+  function drawTimeline() {
+    const el = $('#sec-timeline');
+    if (!el) return;
+    const list = [...(b.timeline || [])].sort((x, y) => (x.t || '').localeCompare(y.t || ''));
+    const day = d => {
+      const n0 = b.brewDate ? Math.round((Date.parse(d) - Date.parse(b.brewDate)) / 864e5) : NaN;
+      const label = new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+      return n0 === 0 ? `Brew day · ${label}` : n0 > 0 ? `Day ${n0} · ${label}` : label;
+    };
+    const groups = [];
+    for (const e of list) {
+      const d = (e.t || '').slice(0, 10) || 'no date';
+      if (groups.at(-1)?.d !== d) groups.push({ d, items: [] });
+      groups.at(-1).items.push(e);
+    }
+    const entry = e => `<li class="tl-entry">
+        ${e.photo ? `<button type="button" class="tl-photo" data-act="tl-view" data-photo-id="${e.photo.id}" aria-label="Open this photo">${photoImg(e.photo, '', e.text ? e.text : 'Brew photo')}</button>` : ''}
+        <div class="tl-body">
+          <div class="tl-meta"><label class="sr" for="tlt-${e.id}">Time</label><input type="datetime-local" id="tlt-${e.id}" data-tl="t" data-id="${e.id}" value="${esc(e.t || '')}">${e.stage ? `<span class="tl-stage">${esc(e.stage)}</span>` : ''}</div>
+          <label class="sr" for="tlx-${e.id}">${e.photo ? 'Caption' : 'Note'}</label>
+          <textarea id="tlx-${e.id}" data-tl="text" data-id="${e.id}" rows="${e.photo ? 1 : 2}" placeholder="${e.photo ? 'Add a caption' : 'Write a note'}">${esc(e.text || '')}</textarea>
+          <div class="tl-actions">${e.photo ? `<button type="button" class="link-btn" data-act="tl-pin" data-id="${e.id}" aria-pressed="${b.pumpClip?.id === e.photo.id}">${b.pumpClip?.id === e.photo.id ? 'Pinned as the pump clip' : 'Pin as the pump clip'}</button>` : ''}
+            <button type="button" class="link-btn danger" data-act="tl-del" data-id="${e.id}">Delete</button></div>
+        </div></li>`;
+    el.innerHTML = `<div class="sec-head"><h2>Timeline</h2><span class="count">${list.length ? `${list.length} ${list.length === 1 ? 'entry' : 'entries'}` : ''}</span></div>
+      <p class="hint">Photos and notes from brew day to the glass: the mash, the fermenter, a sample, the finished beer.</p>
+      <div class="tl-add">
+        <input type="file" id="tl-file" class="sr" accept="image/*" multiple><label class="btn primary file-btn" for="tl-file">Add photos</label>
+        <button type="button" class="btn" data-act="tl-note">Add note</button>
+        <input type="file" id="clip-file" class="sr" accept="image/*"><label class="btn file-btn" for="clip-file">${b.pumpClip ? 'Change pump clip' : 'Add pump clip'}</label>
+      </div>
+      ${b.pumpClip ? '<div class="tl-actions"><button type="button" class="link-btn danger" data-act="clip-del">Remove the pump clip</button></div>' : ''}
+      ${groups.length ? `<ol class="timeline">${groups.map(g => `<li class="tl-day"><h3>${g.d === 'no date' ? 'No date' : day(g.d)}</h3><ol>${g.items.map(entry).join('')}</ol></li>`).join('')}</ol>` : ''}`;
+    loadPhotos(el);
+  }
+  Object.assign(ctx.actions, {
+    'tl-note'() {
+      const e = { id: newPhotoId(), t: localStamp(Date.now()), text: '' };
+      (b.timeline ??= []).push(e);
+      ctx.touch(); drawTimeline();
+      $(`#tlx-${e.id}`)?.focus();
+    },
+    'tl-del'(btn) {
+      if (!confirmTap(btn, 'Tap again to delete')) return;
+      const i = (b.timeline || []).findIndex(x => x.id === btn.dataset.id);
+      if (i < 0) return;
+      const [gone] = b.timeline.splice(i, 1);
+      forgetPhoto(gone.photo?.id);
+      ctx.touch(); drawTimeline();
+    },
+    'tl-pin'(btn) {
+      const e = (b.timeline || []).find(x => x.id === btn.dataset.id);
+      if (!e?.photo) return;
+      const old = b.pumpClip?.id;
+      b.pumpClip = old === e.photo.id ? null : { ...e.photo };
+      if (old !== e.photo.id) forgetPhoto(old);
+      ctx.touch(); drawArt(); drawTimeline();
+      $(`[data-act="tl-pin"][data-id="${e.id}"]`)?.focus();
+    },
+    'clip-del'(btn) {
+      if (!confirmTap(btn, 'Tap again to remove')) return;
+      const old = b.pumpClip?.id;
+      b.pumpClip = null;
+      forgetPhoto(old);
+      ctx.touch(); drawArt(); drawTimeline();
+    },
+    'tl-view'(btn) {
+      const pid = btn.dataset.photoId, e = (b.timeline || []).find(x => x.photo?.id === pid);
+      photoDialog(pid, e?.text || (b.pumpClip?.id === pid ? 'Pump clip' : ''), e?.t);
+    },
+  });
 
   function update() {
     const m = b.measured;

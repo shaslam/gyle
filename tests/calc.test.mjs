@@ -202,7 +202,11 @@ assert.match(raw, /\(House Pale Ale \\\(v2\\\)\) Tj/, 'brackets in text are esca
   assert.equal(bf.brews[0].id, 'bf-2025-01-18-test-pale-batchaaa');
   assert.deepEqual([b.name, b.status, b.brewDate, b.packagedDate, b.recipeId, b.rating], ['Test Pale #7', 'finished', '2025-01-18', '2025-02-01', 'bf-test-pale-recipe00', 4]);
   assert.deepEqual([b.measured.og, b.measured.fermenterVol, b.measured.fg], [1.052, 22, null]);
-  assert.equal(b.notes, '2025-01-20 (Fermenting): Krausen up', 'notes in date order, empty ones left out');
+  assert.equal(b.notes, '', 'dated notes go to the timeline');
+  assert.equal(b.timeline.length, 1, 'empty notes left out');
+  assert.equal(b.timeline[0].text, 'Krausen up');
+  assert.equal(b.timeline[0].stage, 'Fermenting');
+  assert.match(b.timeline[0].t, /^2025-01-(19|20)T\d\d:\d\d$/, 'note time as a local datetime');
   assert.deepEqual(b.deviceReadings, [{ t: '2025-01-19T10:00:00Z', sg: 1.05, temp: 20.1, battery: 4.1 }], 'readings: one per hour, bad ones dropped');
   // the recipe survives the trip through BeerJSON storage
   const back = fromBeerJSON(toBeerJSON(r))[0];

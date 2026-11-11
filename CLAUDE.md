@@ -42,6 +42,7 @@ Always run `node tests/calc.test.mjs` after touching `js/calc.js`, `js/data.js` 
 | `js/brewfather.js` | Brewfather complete backup (`backup.json` in a zip) -> recipes, brew logs, equipment and water profiles. Pure: `importBrewfather()` in `app.js` stores the result. Ids are `bf-…` from the Brewfather id, so a second import skips what is there |
 | `js/unzip.js` | Minimal zip reader (stored and deflate entries, via `DecompressionStream`) |
 | `js/store.js` | Local working copy (localStorage) and syncing. Backend-agnostic |
+| `js/photos.js` | Brew photos: IndexedDB copy of each JPEG (`{ id, blob, owner, deleted }`), `shrink()` to 1600 px, `flush(backend)` uploads and deletes. `store.push()` and `store.sync()` call it. A photo error does not stop documents saving. Backends add `putFile`/`getFile`/`removeFile`. Git uses `photos/<id>.jpg`, Supabase uses the Storage bucket `photos` with one folder per user id |
 | `js/backend-git.js` | Storage backend: GitHub contents API, one commit per save |
 | `js/backend-supabase.js` | Storage backend: Supabase Auth + a `documents` table over plain `fetch` (no SDK) |
 | `js/config.js` | Supabase project URL and public key (currently empty: typed into Settings instead) |
@@ -70,6 +71,13 @@ count up in `version`. Old recipes without these fields are version 1 of a famil
 their own id (`familyOf()`, `versionOf()` in `app.js`). Lists show only the newest version per
 family (`latestOnly()`), and the brew queue keeps the newest version's id (`swapInQueue()`).
 A recipe started from another one gets a new family and `basedOn: { id, name, version }`.
+
+### Brew photos and timeline
+
+A brew log has `timeline: [{ id, t, text, stage?, photo?: { id, w, h } }]` (`t` is a local
+`datetime-local` value) and `pumpClip: { id, w, h }`. A pinned timeline photo shares its id with
+the clip, so a photo file is removed only when neither uses it (`forgetPhoto()` in `brewView`).
+`notesToTimeline()` moves the dated notes of older Brewfather imports into the timeline.
 
 ### Settings document
 

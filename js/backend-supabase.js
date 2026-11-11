@@ -150,4 +150,34 @@ export class SupabaseBackend {
   async remove(kind, id) {
     await this.#rest(`?kind=eq.${encodeURIComponent(kind)}&id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
+
+  // ---- photos: Supabase Storage, bucket "photos", one folder per person ----
+  async #storage(path, { method = 'GET', body, headers = {} } = {}) {
+    const token = await this.#token();
+    let res;
+    try {
+      res = await fetch(`${this.url}/storage/v1/object/${path}`, { method, cache: 'no-store', headers: { apikey: this.key, Authorization: `Bearer ${token}`, ...headers }, body });
+    } catch {
+      throw Object.assign(new Error('Could not reach your Gyle account to save photos. Check your connection.'), { status: 0 });
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const text = `${data.error || ''} ${data.message || ''}`;
+      if (/bucket not found/i.test(text)) throw Object.assign(new Error('The Supabase project has no photos bucket yet. Run supabase/setup.sql again in its SQL editor.'), { status: 404 });
+      const status = +data.statusCode || res.status;
+      throw Object.assign(new Error(status === 404 ? 'That photo is not in your account.' : `Photo upload failed: ${data.message || data.error || res.status}`), { status });
+    }
+    return res;
+  }
+  #photoPath(name) { return `photos/${this.user.id}/${name}`; }
+  async putFile(name, blob) {
+    await this.#storage(this.#photoPath(name), { method: 'POST', body: blob, headers: { 'Content-Type': blob.type || 'image/jpeg', 'x-upsert': 'true' } });
+  }
+  async getFile(name) {
+    return (await this.#storage('authenticated/' + this.#photoPath(name))).blob();
+  }
+  async removeFile(name) {
+    try { await this.#storage(this.#photoPath(name), { method: 'DELETE' }); }
+    catch (e) { if (e.status !== 404) throw e; }
+  }
 }

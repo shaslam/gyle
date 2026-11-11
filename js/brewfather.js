@@ -20,12 +20,24 @@ const round = (x, d = 3) => (Number.isFinite(x) ? +x.toFixed(d) : x);
 const lower = s => String(s || '').trim().toLowerCase();
 
 // Brewfather dates come as milliseconds, { _seconds }, { seconds } or ISO text.
-function toDate(x) {
+function toMs(x) {
   let ms = null;
   if (typeof x === 'number') ms = x;
   else if (typeof x === 'string') ms = Date.parse(x);
   else if (x && typeof x === 'object') ms = (x._seconds ?? x.seconds) * 1000;
-  return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : null;
+  return Number.isFinite(ms) ? ms : null;
+}
+function toDate(x) {
+  const ms = toMs(x);
+  return ms == null ? null : new Date(ms).toISOString().slice(0, 10);
+}
+// A time as a datetime-local value ("2026-03-21T14:30") in this computer's time zone.
+function localStamp(x) {
+  const ms = toMs(x);
+  if (ms == null) return '';
+  const d = new Date(ms);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
 }
 
 export const slug = s => (s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').slice(0, 40) || 'recipe';
@@ -172,8 +184,9 @@ function deviceReadings(docs, batchId) {
 export function brewFrom(b, docs, recipeIds, equipment, targets) {
   const snap = recipeFrom(b.recipe || {}, equipment, targets);
   const eq = b.recipe?.equipment ? equipmentFrom(b.recipe.equipment) : null;
-  const notes = [...(b.notes || [])].filter(n => String(n.note || '').trim()).sort((x, y) => num(x.timestamp, 0) - num(y.timestamp, 0))
-    .map(n => `${toDate(n.timestamp) || ''}${n.status ? ` (${n.status})` : ''}: ${String(n.note || '').trim()}`).join('\n\n');
+  // Brewfather's dated notes become timeline entries, at the local time they were written.
+  const timeline = [...(b.notes || [])].filter(n => String(n.note || '').trim()).sort((x, y) => num(x.timestamp, 0) - num(y.timestamp, 0))
+    .map((n, i) => ({ id: `bf${tag(b._id)}n${i}`, t: localStamp(n.timestamp), text: String(n.note || '').trim(), ...(n.status ? { stage: String(n.status) } : {}) }));
   const finished = /completed|archived|conditioning/i.test(b.status || '') || b.bottlingDateSet;
   const rating = num(b.tasteRating, 0) > 0 ? Math.max(1, Math.min(5, Math.round(num(b.tasteRating) / 20))) : null;
   const label = b.name && b.name !== 'Batch' ? ` (${b.name})` : '';
@@ -188,7 +201,7 @@ export function brewFrom(b, docs, recipeIds, equipment, targets) {
       preBoilVol: num(b.measuredBoilSize), preBoilSG: num(b.measuredPreBoilGravity), og: num(b.measuredOg),
       fermenterVol: num(b.measuredBatchSize), fg: num(b.measuredFg),
     },
-    readings: [], checklist: {}, notes, tasting: b.tasteNotes || '', rating,
+    readings: [], checklist: {}, notes: '', timeline, tasting: b.tasteNotes || '', rating,
     ...(readings.length ? { deviceReadings: readings } : {}),
   };
 }
