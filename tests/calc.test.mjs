@@ -192,6 +192,8 @@ assert.match(raw, /\(House Pale Ale \\\(v2\\\)\) Tj/, 'brackets in text are esca
   assert.deepEqual(r.miscs.map(m => [m.name, m.unit, m.amount]), [['Protafloc', 'each', 1], ['Nutrient', 'ml', 4.93]], 'water calculator rows dropped, units converted');
   assert.deepEqual(r.water, { source: 'bf-tapwater', salts: { gypsum: 5.5, cacl2: 1 }, acid: { type: 'lactic80', ml: 2 } }, 'water: mash plus sparge salts, one-off target left out');
   assert.equal(r.equipment, 'bf-eqabcdef');
+  assert.equal(r.status, 'archived', 'backup recipes arrive archived, out of the brew queue');
+  assert.equal(fromBeerJSON(toBeerJSON(r))[0].status, 'archived', 'archived status survives BeerJSON');
   assert.deepEqual([r.created, r.modified], ['2023-01-20', '2023-11-14']);
   assert.deepEqual(bf.profiles[0], { id: 'bf-eqabcdef', name: 'Kettle', batchSize: 23, efficiency: 64, boilTime: 60, boilOff: 2, kettleLoss: 2, mashLoss: 1.5, absorption: 0.96, mashRatio: 3, grainTemp: 20 });
   assert.deepEqual(bf.waters.map(w => w.id), ['bf-tapwater'], 'source water imported, built-in target not used by a recipe left out');

@@ -144,7 +144,8 @@ export function recipeFrom(r, equipment = new Map(), targets = new Set()) {
     mash: (r.mash?.steps || []).map(s => ({ name: s.name || s.type || 'Step', temp: round(num(s.stepTemp, 66), 1), time: round(num(s.stepTime, 60), 0) })),
     fermentation: (r.fermentation?.steps || []).map(s => ({ name: s.name || s.type || 'Step', temp: round(num(s.stepTemp, 19), 1), days: round(num(s.stepTime, 7), 1) })),
     ...(water ? { water } : {}),
-    carbonation: round(num(r.carbonation, 2.4), 2), notes: r.notes || '', status: 'planning',
+    carbonation: round(num(r.carbonation, 2.4), 2), notes: r.notes || '',
+    status: 'archived', // a backup brings in years of recipes: they wait in the archive, out of the brew queue
     created: toDate(r._created) || toDate(r._timestamp_ms) || new Date().toISOString().slice(0, 10),
     modified: toDate(r._timestamp_ms) || toDate(r._created) || new Date().toISOString().slice(0, 10),
   };

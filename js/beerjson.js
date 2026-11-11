@@ -3,7 +3,7 @@
 // Three things BeerJSON has no field for are kept under x_ keys: a hop's
 // first-wort / whirlpool use (x_use), whirlpool temperature (x_temp) and the
 // mash water-to-grain ratio (x_mash_ratio). x_equipment is the id of the
-// equipment profile the recipe was designed on, and x_status is 'planning' or 'ready'.
+// equipment profile the recipe was designed on, and x_status is 'planning', 'ready' or 'archived'.
 // Versions: x_family is shared by every version of a recipe (the id of the first one), x_version
 // counts from 1, x_version_note says what changed, and x_based_on names the recipe a new
 // recipe was started from ({ id, name, version }). Other software ignores all of them.
@@ -91,7 +91,7 @@ export function toBeerJSON(r) {
     x_mash_ratio: U(r.mashRatio ?? 3, 'l/kg'),
     x_modified: r.modified || today(),
     ...(r.equipment ? { x_equipment: r.equipment } : {}),
-    x_status: r.status === 'ready' ? 'ready' : 'planning',
+    x_status: r.status === 'ready' || r.status === 'archived' ? r.status : 'planning',
     ...(r.water ? { x_water: r.water } : {}),
     ...(r.family ? { x_family: r.family } : {}),
     ...(r.version > 1 ? { x_version: r.version } : {}),
@@ -170,7 +170,7 @@ export function recipeFromJSON(j) {
     efficiency: round(v(j.efficiency?.brewhouse) || 72, 1),
     mashRatio: round(v(j.x_mash_ratio) || 3, 2),
     ...(j.x_equipment ? { equipment: j.x_equipment } : {}),
-    status: j.x_status === 'ready' ? 'ready' : 'planning',
+    status: j.x_status === 'ready' || j.x_status === 'archived' ? j.x_status : 'planning',
     ...(j.x_water ? { water: j.x_water } : {}),
     ...(j.x_family ? { family: String(j.x_family) } : {}),
     ...(j.x_version > 1 ? { version: Math.round(+j.x_version) } : {}),

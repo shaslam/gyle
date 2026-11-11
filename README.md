@@ -105,9 +105,16 @@ to brew next. Drag a row by its numbered handle (or focus the handle and use the
 keys) to reorder. The order is stored as `brewOrder` in `settings.json`. The Order menu
 switches the list to recently edited or by name.
 
-Each recipe is flagged **In planning** or **Ready to brew** (the toggle under its name;
-`x_status` in the file). The first ready recipe in the queue is tagged as the next brew,
-and the Show menu filters the list by status.
+Each recipe is flagged **In planning**, **Ready to brew** or **Archived** with the toggle
+under its name. The file stores this as `x_status`. The queue lists ready recipes first,
+then recipes in planning. You can drag rows only inside their own group. The first ready
+recipe is tagged as the next brew. When a recipe changes status, it goes to the bottom of
+its new group.
+
+Archived recipes are not in the queue or in the brew picker. To see them, set Show to
+Archived. To bring one back, press Restore on its row, or choose In planning or Ready to
+brew on the recipe. To archive many recipes at once, set Show to a status or type a
+search, then press "Archive these".
 
 ## Versions and new recipes
 
@@ -198,7 +205,8 @@ A Brewfather complete backup brings in these items:
 - every batch as a brew log, with its notes, OG, volume, rating and iSpindel or Tilt readings
 - your equipment profiles, and the water profiles that you made or that a recipe uses
 
-Gyle leaves out the inventory, the device settings, the calendar and Brewfather's recipe
+The recipes from a backup arrive archived, so they do not fill the brew queue. Restore
+the ones that you plan to brew. Gyle leaves out the inventory, the device settings, the calendar and Brewfather's recipe
 version history. Brewfather's version copies are the same as the recipe in every backup
 checked so far. If you import a newer backup later, Gyle adds only what is new. It does
 not change a recipe or a brew log that came from an earlier import.

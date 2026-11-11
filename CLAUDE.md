@@ -74,7 +74,11 @@ A recipe started from another one gets a new family and `basedOn: { id, name, ve
 ### Settings document
 
 `settings/settings` holds `profiles` + `defaultProfile` (equipment), `waters` + `defaultWater`,
-and `brewOrder` (the draggable brew queue: recipe ids, next brew first).
+and `brewOrder` (the draggable brew queue: recipe ids, next brew first). `queued()` sorts by
+status first (ready, planning, archived) and by `brewOrder` inside each status, so the list draws
+one draggable group per status. `setStatus()` changes every version of a recipe and moves it to the
+bottom of its new group. Archived recipes are hidden from the queue and the brew picker. Recipes
+from a Brewfather backup arrive archived.
 
 ## What has and has not been verified
 

@@ -695,11 +695,27 @@ function sheetDialog(html, onSubmit, onOpen) {
 
 // ---------- recipes list ----------
 // The brew queue: recipe ids in the order you plan to brew them, kept in settings.json
-// so one drag is one small commit. Recipes not in the list yet sit at the bottom.
+// so one drag is one small commit. Ready recipes come first, then those in planning, then
+// archived ones (which the list hides). Within each group the saved order applies, and
+// recipes not in the saved order yet sit at the bottom of their group.
+const statusOf = data => (data?.status === 'ready' || data?.status === 'archived' ? data.status : 'planning');
+const STATUS_RANK = { ready: 0, planning: 1, archived: 2 };
 function queued(items) {
   const pos = new Map((store.get('settings', 'settings')?.brewOrder || []).map((id, i) => [id, i]));
-  return [...items].sort((a, b) => (pos.get(a.id) ?? 1e9) - (pos.get(b.id) ?? 1e9)
+  return [...items].sort((a, b) => STATUS_RANK[statusOf(a.data)] - STATUS_RANK[statusOf(b.data)]
+    || (pos.get(a.id) ?? 1e9) - (pos.get(b.id) ?? 1e9)
     || (b.data.modified || '').localeCompare(a.data.modified || '') || a.data.name.localeCompare(b.data.name));
+}
+// Give a recipe a new status (all its versions) and put it at the bottom of its new group.
+function setStatus(id, status) {
+  const r = store.get('recipes', id);
+  for (const v of versionsOf(familyOf(id, r))) {
+    if (statusOf(v.data) === status) continue;
+    v.data.status = status; v.data.modified = today(); store.touch('recipes', v.id);
+  }
+  const latest = versionsOf(familyOf(id, r)).at(-1)?.id || id;
+  const order = queued(latestOnly(store.list('recipes'))).map(x => x.id).filter(x => x !== latest);
+  saveQueue([...order, latest]);
 }
 function saveQueue(ids) {
   const doc = clone(store.get('settings', 'settings') || {});
@@ -760,15 +776,18 @@ function enableReorder(list, onMove) {
     const rows = [...list.querySelectorAll('.q-row')], from = rows.indexOf(grip.closest('.q-row'));
     const to = from + (e.key === 'ArrowUp' ? -1 : 1);
     if (to < 0 || to >= rows.length) return;
+    const qid = grip.dataset.qid;
     onMove(from, to);
-    list.querySelectorAll('.grip')[to]?.focus();
+    // The list may have been drawn again: find the same handle by its recipe id.
+    (qid && document.querySelector(`.grip[data-qid="${qid}"]`) || list.querySelectorAll('.grip')[to])?.focus();
   });
 }
 
 const RECIPE_SORTS = [['queue', 'Brew queue'], ['recent', 'Recently edited'], ['name', 'Name']];
-const RECIPE_SHOWS = [['all', 'All recipes'], ['ready', 'Ready to brew'], ['planning', 'In planning']];
-let recipeSort = 'queue', recipeShow = 'all';
-const isReady = data => data.status === 'ready';
+const RECIPE_SHOWS = [['queue', 'Ready and planning'], ['ready', 'Ready to brew'], ['planning', 'In planning'], ['archived', 'Archived'], ['all', 'All recipes']];
+let recipeSort = 'queue', recipeShow = 'queue';
+const isReady = data => statusOf(data) === 'ready';
+const STATUS_PILL = { ready: ['s-finished', 'Ready'], planning: ['', 'Planning'], archived: ['s-archived', 'Archived'] };
 
 function recipesView() {
   let shown = []; // what is on screen, in order
@@ -796,38 +815,65 @@ function recipesView() {
       <label class="fld search" for="show"><span>Show</span><select id="show">${RECIPE_SHOWS.map(([v, t]) => `<option value="${v}"${v === recipeShow ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
     </div>
     <p class="hint on-wall" id="queue-hint"></p>
-    <div id="recipe-list" class="list"></div>`;
-  enableReorder($('#recipe-list'), (from, to) => {
-    const ids = shown.map(x => x.id);
-    ids.splice(to, 0, ids.splice(from, 1)[0]);
-    saveQueue(ids); // redraws through the store's change event
-  });
+    <div id="bulk" class="foot-actions on-wall"></div>
+    <div id="recipe-list"></div>`;
+  ctx.actions.restore = btn => { setStatus(btn.dataset.id, 'planning'); toast('Back in the brew queue, at the bottom.'); };
+  ctx.actions['archive-shown'] = btn => {
+    const ids = shown.filter(x => statusOf(x.data) !== 'archived').map(x => x.id);
+    if (!confirmTap(btn, `Tap again to archive ${ids.length}`)) return;
+    ids.forEach(x => setStatus(x, 'archived'));
+    toast(`Archived ${ids.length} recipe${ids.length > 1 ? 's' : ''}. Show → Archived lists them.`);
+  };
+  const grip = (name, i, id) => `<button type="button" class="grip" data-qid="${esc(id)}" aria-label="Move ${esc(name)}, now number ${i + 1} in the queue. Drag, or use the up and down arrow keys."><b>${i + 1}</b><svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true"><g fill="currentColor"><circle cx="2" cy="2" r="1.6"/><circle cx="8" cy="2" r="1.6"/><circle cx="2" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="2" cy="14" r="1.6"/><circle cx="8" cy="14" r="1.6"/></g></svg></button>`;
+  function row({ id, data, dirty }, i, canDrag, nextId) {
+    const s = C.recipeStats(data, equipFor(data)), [pillCls, pillText] = STATUS_PILL[statusOf(data)];
+    const archived = statusOf(data) === 'archived';
+    return `<div class="q-row${archived ? ' archived' : ''}">
+      ${canDrag ? grip(data.name, i, id) : ''}
+      <a class="item" href="#recipe/${id}">
+      ${pint(C.srmToHex(s.srm), 34)}
+      <span class="item-main">${id === nextId ? '<span class="next-tag">Next brew</span>' : ''}<strong>${esc(data.name)}</strong><small>${versionOf(data) > 1 ? `v${versionOf(data)} · ` : ''}${esc(data.style || 'No style')} · ${n(data.batchSize, 0)} L${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small></span>
+      <span class="pill ${pillCls}">${pillText}</span>
+      <span class="item-stats"><span><b>${sg(s.og)}</b> OG</span><span><b>${n(s.ibu, 0)}</b> IBU</span><span><b>${n(s.abv)}</b> %</span></span>
+      </a>${archived ? `<button type="button" class="btn small restore" data-act="restore" data-id="${id}" aria-label="Bring ${esc(data.name)} back to the brew queue">Restore</button>` : ''}</div>`;
+  }
   function draw() {
     const q = ctx.q.trim().toLowerCase();
     const all = latestOnly(store.list('recipes'));
     const sorted = recipeSort === 'queue' ? queued(all)
       : recipeSort === 'name' ? [...all].sort((a, b) => a.data.name.localeCompare(b.data.name))
       : [...all].sort((a, b) => (b.data.modified || '').localeCompare(a.data.modified || '') || a.data.name.localeCompare(b.data.name));
-    shown = sorted.filter(({ data }) => (!q || `${data.name} ${data.style}`.toLowerCase().includes(q))
-      && (recipeShow === 'all' || (recipeShow === 'ready') === isReady(data)));
-    const whole = !q && recipeShow === 'all';
+    const want = st => recipeShow === 'all' || (recipeShow === 'queue' ? st !== 'archived' : st === recipeShow);
+    shown = sorted.filter(({ data }) => (!q || `${data.name} ${data.style}`.toLowerCase().includes(q)) && want(statusOf(data)));
+    const whole = !q && recipeShow === 'queue';
     const canDrag = recipeSort === 'queue' && whole && shown.length > 1;
     const nextId = queued(all).find(x => isReady(x.data))?.id; // the first ready recipe in the queue is the next brew
+    const archivedCount = all.filter(x => statusOf(x.data) === 'archived').length;
     $('#queue-hint').textContent = recipeSort !== 'queue' || !all.length ? ''
-      : !whole ? 'Show all recipes with no search to reorder the queue.'
-      : shown.length > 1 ? `Your brew queue: drag a handle to reorder. ${nextId ? 'The first recipe that is ready to brew is next.' : 'Nothing is flagged ready to brew yet.'}` : '';
-    $('#recipe-list').innerHTML = shown.length ? shown.map(({ id, data, dirty }, i) => {
-      const s = C.recipeStats(data, equipFor(data));
-      return `<div class="q-row">
-        ${canDrag ? `<button type="button" class="grip" aria-label="Move ${esc(data.name)}, now number ${i + 1} in the queue. Drag, or use the up and down arrow keys."><b>${i + 1}</b><svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true"><g fill="currentColor"><circle cx="2" cy="2" r="1.6"/><circle cx="8" cy="2" r="1.6"/><circle cx="2" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="2" cy="14" r="1.6"/><circle cx="8" cy="14" r="1.6"/></g></svg></button>` : ''}
-        <a class="item" href="#recipe/${id}">
-        ${pint(C.srmToHex(s.srm), 34)}
-        <span class="item-main">${id === nextId ? '<span class="next-tag">Next brew</span>' : ''}<strong>${esc(data.name)}</strong><small>${versionOf(data) > 1 ? `v${versionOf(data)} · ` : ''}${esc(data.style || 'No style')} · ${n(data.batchSize, 0)} L${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small></span>
-        <span class="pill ${isReady(data) ? 's-finished' : ''}">${isReady(data) ? 'Ready' : 'Planning'}</span>
-        <span class="item-stats"><span><b>${sg(s.og)}</b> OG</span><span><b>${n(s.ibu, 0)}</b> IBU</span><span><b>${n(s.abv)}</b> %</span></span>
-      </a></div>`;
-    }).join('') : all.length ? '<p class="empty">No recipes match.</p>'
-      : `<div class="empty-state"><h2>No recipes yet</h2><p>Start a new recipe, or import BeerXML or BeerJSON files exported from BeerSmith or Brewfather.${store.connected ? '' : ' Choose where to keep them in Settings.'}</p></div>`;
+      : !whole ? (recipeShow === 'archived' ? 'Archived recipes are out of the brew queue. Restore one to put it back at the bottom.' : 'Show "Ready and planning" with no search to reorder the queue.')
+      : shown.length > 1 ? `Your brew queue: ready recipes first, then those in planning. Drag a handle to reorder. ${nextId ? 'The first ready recipe is next.' : 'Nothing is flagged ready to brew yet.'}${archivedCount ? ` ${archivedCount} archived recipe${archivedCount > 1 ? 's are' : ' is'} not shown.` : ''}` : '';
+    // Archiving many at once: filter the list by status or a search first.
+    const archivable = shown.filter(x => statusOf(x.data) !== 'archived').length;
+    $('#bulk').innerHTML = archivable > 1 && (q || recipeShow === 'planning' || recipeShow === 'ready')
+      ? `<button type="button" class="btn small" data-act="archive-shown">Archive these ${archivable}</button>` : '';
+    if (!shown.length) {
+      $('#recipe-list').innerHTML = `<div class="list">${all.length ? '<p class="empty">No recipes match.</p>'
+        : `<div class="empty-state"><h2>No recipes yet</h2><p>Start a new recipe, or import BeerXML or BeerJSON files exported from BeerSmith or Brewfather, or a Brewfather backup.${store.connected ? '' : ' Choose where to keep them in Settings.'}</p></div>`}</div>`;
+      return;
+    }
+    if (!canDrag) { $('#recipe-list').innerHTML = `<div class="list">${shown.map((x, i) => row(x, i, false, nextId)).join('')}</div>`; return; }
+    // The queue in two groups, each reordered on its own: ready first, then in planning.
+    const groups = [['ready', 'Ready to brew'], ['planning', 'In planning']].map(([st, title]) => ({ st, title, items: shown.filter(x => statusOf(x.data) === st) })).filter(g => g.items.length);
+    let at = 0;
+    $('#recipe-list').innerHTML = groups.map(g => `<h2 class="q-head on-wall">${g.title}</h2><div class="list" data-group="${g.st}">${g.items.map(x => row(x, at++, g.items.length > 1, nextId)).join('')}</div>`).join('');
+    for (const g of groups) {
+      enableReorder($(`#recipe-list [data-group="${g.st}"]`), (from, to) => {
+        const ids = g.items.map(x => x.id);
+        ids.splice(to, 0, ids.splice(from, 1)[0]);
+        // The queue sorts by status first, so only the order inside this group changes.
+        saveQueue([...ids, ...queued(all).map(x => x.id).filter(x => !ids.includes(x))]); // redraws through the store's change event
+      });
+    }
   }
   ctx.refresh = draw;
   draw();
@@ -908,7 +954,7 @@ function importBrewfather(json, added, renamed) {
   }
   const parts = [[count.recipes, 'recipe'], [count.brews, 'brew log'], [count.profiles, 'equipment profile'], [count.waters, 'water profile']]
     .filter(([k]) => k).map(([k, w]) => `${k} ${w}${k > 1 ? 's' : ''}`);
-  return `From Brewfather: ${parts.length ? `imported ${parts.join(', ')}.` : 'nothing new.'}${count.had ? ` ${count.had} item${count.had > 1 ? 's were' : ' was'} imported before and left as ${count.had > 1 ? 'they are' : 'it is'}.` : ''}`;
+  return `From Brewfather: ${parts.length ? `imported ${parts.join(', ')}.` : 'nothing new.'}${count.recipes ? ' The recipes are archived, out of the brew queue: Show → Archived lists them, and Restore puts one back.' : ''}${count.had ? ` ${count.had} item${count.had > 1 ? 's were' : ' was'} imported before and left as ${count.had > 1 ? 'they are' : 'it is'}.` : ''}`;
 }
 
 // ---------- recipe editor ----------
@@ -992,7 +1038,12 @@ function recipeView(id) {
       'export-json': () => download(slug(vName(r)) + '.json', JSON.stringify(toBeerJSON(r), null, 2), 'application/json'),
       'export-xml': () => download(slug(vName(r)) + '.xml', toBeerXML(r), 'text/xml'),
       brew() { location.hash = '#brew/' + newBrew(id, r); },
-      status(btn) { r.status = btn.dataset.v; ctx.touch(); update(); },
+      status(btn) {
+        const was = statusOf(r);
+        setStatus(id, btn.dataset.v); update();
+        if (btn.dataset.v === 'archived') toast('Archived. It is out of the brew queue. Choose In planning or Ready to brew to bring it back.');
+        else if (was === 'archived') toast('Back in the brew queue, at the bottom.');
+      },
       'add-ferm': () => fermentableDialog(r, null, () => { ctx.touch(); renderList('fermentables'); update(); }),
       'edit-ferm': btn => fermentableDialog(r, +btn.dataset.i, () => { ctx.touch(); renderList('fermentables'); update(); }),
       'suggest-salts'() {
@@ -1112,9 +1163,9 @@ function recipeView(id) {
     const s = C.recipeStats(r, eq);
     const st = findStyle(r.style);
     $('#hero-over').textContent = `${r.style || 'No style set'} · ${n(+r.batchSize, 0)} L`;
-    const ready = r.status === 'ready';
-    $('#status-toggle').innerHTML = [['planning', 'In planning'], ['ready', 'Ready to brew']].map(([v, t]) =>
-      `<button type="button" class="seg${(v === 'ready') === ready ? ' on' : ''}" data-act="status" data-v="${v}" aria-pressed="${(v === 'ready') === ready}">${t}</button>`).join('');
+    const status = statusOf(r);
+    $('#status-toggle').innerHTML = [['planning', 'In planning'], ['ready', 'Ready to brew'], ['archived', 'Archived']].map(([v, t]) =>
+      `<button type="button" class="seg${v === status ? ' on' : ''}" data-act="status" data-v="${v}" aria-pressed="${v === status}">${t}</button>`).join('');
     $('#hero-art').innerHTML = pint(C.srmToHex(s.srm), 84, 1, !poured) + `<span class="stamp"><b>${n(s.abv)}</b>% ABV</span>`;
     poured = true;
     $('#fit-line').innerHTML = +r.batchSize === +eq.batchSize && +r.efficiency === +eq.efficiency
@@ -1273,7 +1324,7 @@ const clock = ms => {
 };
 
 function brewsView() {
-  const recipes = queued(latestOnly(store.list('recipes'))); // newest versions, in queue order
+  const recipes = queued(latestOnly(store.list('recipes'))).filter(x => statusOf(x.data) !== 'archived'); // newest versions, in queue order
   const nextUp = recipes.find(r => r.data.status === 'ready')?.id; // first ready recipe is preselected
   ctx = {
     actions: {

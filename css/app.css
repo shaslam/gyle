@@ -321,6 +321,13 @@ input[type="checkbox"] { width: 22px; height: 22px; flex: 0 0 22px; accent-color
 .q-row.dragging .item, .q-row.dragging .grip { box-shadow: 0 14px 26px rgb(40 26 4 / .4); }
 .next-tag { font: 800 11px/1 var(--font-body); font-stretch: 75%; letter-spacing: .16em; text-transform: uppercase; color: var(--red); }
 @media (prefers-reduced-motion: reduce) { .q-row { transition: none; } }
+#recipe-list { display: flex; flex-direction: column; gap: 10px; }
+.q-head { background: none; padding: 0; margin: 8px 0 -2px; font: 800 12px/1 var(--font-body); font-stretch: 75%; letter-spacing: .16em; text-transform: uppercase; color: var(--on-wall-muted); }
+.q-head:first-child { margin-top: 0; }
+.q-row.archived .item { opacity: .78; }
+.q-row .restore { align-self: center; flex: 0 0 auto; margin-left: 8px; }
+#bulk:empty { display: none; }
+#bulk { margin: 0; }
 .list-tools .fld.search { flex: 1 1 120px; } .list-tools .fld.search.w-name { flex: 3 1 170px; }
 
 /* ---- recipe status ---- */
