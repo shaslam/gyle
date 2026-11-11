@@ -6,6 +6,7 @@ import { toBeerXML } from '../js/beerxml.js';
 import { grainDiPh } from '../js/data.js';
 import { sheetPdf } from '../js/brewsheet.js';
 import { toWinAnsi } from '../js/pdf.js';
+import { inBeer } from '../js/sources.js';
 
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg}: got ${a}, expected ${b} ±${tol}`);
 
@@ -227,5 +228,12 @@ assert.match(raw, /\(House Pale Ale \\\(v2\\\)\) Tj/, 'brackets in text are esca
   assert.equal(Buffer.from(got[0].bytes).toString(), 'plain');
   assert.equal(fromBrewfatherBackup(JSON.parse(Buffer.from(got[1].bytes).toString())).recipes.length, 1, 'zip: deflated backup reads back');
 }
+// Hydrometer readings after it came out of the beer are left out; small wobbles stay in.
+{
+  const r = [1.050, 1.040, 1.047, 1.020, 1.010, 1.010, 1.119, 1.010, 1.120].map((sg, i) => ({ t: `2026-01-0${i + 1}`, sg }));
+  assert.deepEqual(inBeer(r).map(x => x.sg), [1.050, 1.040, 1.047, 1.020, 1.010, 1.010, 1.010]);
+  assert.deepEqual(inBeer(undefined), []);
+}
+
 console.log('All checks passed.');
 console.log(`House Pale Ale: OG ${s.og.toFixed(3)}  FG ${s.fg.toFixed(3)}  ABV ${s.abv.toFixed(1)}  IBU ${s.ibu.toFixed(0)}  EBC ${s.ebc.toFixed(0)}`);

@@ -70,6 +70,18 @@ export async function fetchThingSpeak(device, key, from, to) {
   return { readings: hourly(readings), fields: names, used: { gravity: gf, temp: tf, battery: bf }, raw: (data.feeds || []).length };
 }
 
+// The readings taken while the hydrometer floated in the beer. Gravity only falls during
+// fermentation, so a reading well above the lowest one before it came after the hydrometer
+// was taken out (for packaging or cleaning). Those readings are left out.
+export function inBeer(readings, slack = 0.010) {
+  let low = Infinity;
+  return (readings || []).filter(r => {
+    if (r.sg > low + slack) return false;
+    low = Math.min(low, r.sg);
+    return true;
+  });
+}
+
 // "Stable" means the last `days` of readings stayed within two gravity points.
 export function stableFor(readings, days = 2) {
   if (!readings?.length) return false;

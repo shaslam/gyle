@@ -4,7 +4,7 @@ import { parseBeerXML, toBeerXML, decodeXmlBytes } from './beerxml.js';
 import { toBeerJSON, fromBeerJSON, blankRecipe } from './beerjson.js';
 import { store } from './store.js';
 import { timer } from './timer.js';
-import { fetchThingSpeak, stableFor } from './sources.js';
+import { fetchThingSpeak, stableFor, inBeer } from './sources.js';
 import { sheetHtml, sheetPdf } from './brewsheet.js';
 import { isBrewfatherBackup, fromBrewfatherBackup } from './brewfather.js';
 import { unzip } from './unzip.js';
@@ -1356,7 +1356,8 @@ function brewsView() {
       <label class="fld w-name" for="brew-recipe"><span>Start a brew from</span><select id="brew-recipe">${recipes.map(r => `<option value="${r.id}"${r.id === nextUp ? ' selected' : ''}>${esc(vName(r.data))}${r.data.status === 'ready' ? '' : ' (in planning)'}</option>`).join('')}</select></label>
       <button type="button" class="btn primary" data-act="new">Start brew</button></div></div>` : ''}
     <div class="list">${brews.length ? brews.map(({ id, data: b, dirty }) => {
-      const m = b.measured || {}, last = [...(b.readings || [])].filter(x => x.sg).sort((a, c) => (a.date || '').localeCompare(c.date || '')).at(-1);
+      const m = b.measured || {}, typed = [...(b.readings || [])].filter(x => x.sg).sort((a, c) => (a.date || '').localeCompare(c.date || '')).at(-1);
+      const auto = inBeer(b.deviceReadings).at(-1), last = auto && (!typed || auto.t.slice(0, 10) >= (typed.date || '')) ? auto : typed;
       const fg = m.fg || last?.sg, hex = C.srmToHex(C.recipeStats(b.recipe, b.equipment || equipFor(b.recipe)).srm);
       return `<a class="item" href="#brew/${id}">
         ${pint(hex, 34)}
@@ -1437,7 +1438,7 @@ function brewView(id) {
       <div class="foot-actions"><button type="button" class="btn primary" data-act="dev-fetch"${fetching ? ' disabled' : ''}>${fetching ? 'Fetching…' : list.length ? 'Fetch latest' : 'Link and fetch'}</button>
         ${d.channel ? '<button type="button" class="btn danger" data-act="dev-unlink">Unlink</button>' : ''}</div>
       ${latest ? `<div class="summary"><span>Latest <b>${sg(latest.sg)}</b>${latest.temp != null ? ` at <b>${n(latest.temp)} °C</b>` : ''}, ${ago(latest.t)}</span>${latest.battery != null ? `<span>Battery <b>${n(latest.battery, 2)} V</b></span>` : ''}
-        ${stableFor(list) ? '<span class="stable">Stable for 2 days: likely finished</span>' : ''}</div>` : ''}
+        ${stableFor(inBeer(list)) ? '<span class="stable">Stable for 2 days: likely finished</span>' : ''}</div>` : ''}
       <p class="hint" role="status">${esc(deviceMsg)}</p>`;
   }
   async function fetchDevice(quiet = false) {
@@ -1559,7 +1560,7 @@ function brewView(id) {
   function update() {
     const m = b.measured;
     const typed = [...b.readings].filter(x => x.sg).sort((a, c) => (a.date || '').localeCompare(c.date || '')).at(-1);
-    const auto = b.deviceReadings?.at(-1);
+    const auto = inBeer(b.deviceReadings).at(-1);
     const last = auto && (!typed || auto.t.slice(0, 10) >= (typed.date || '')) ? auto : typed;
     const fg = m.fg || last?.sg, fgNote = !m.fg && last ? (last === auto ? ' (latest from hydrometer)' : ' (latest reading)') : '';
     const eff = C.measuredEfficiency(r, m.og, m.fermenterVol, eq);
@@ -1579,7 +1580,7 @@ function brewView(id) {
     </tbody></table>`;
     $('#done-count').textContent = `${steps.filter((_, i) => b.checklist['s' + i]).length} of ${steps.length} done`;
     const c = $('#chart');
-    if (c) c.innerHTML = readingsChart(b.readings, m.og, plan.fg, b.deviceReadings || []);
+    if (c) c.innerHTML = readingsChart(b.readings, m.og, plan.fg, inBeer(b.deviceReadings));
     saveState('brews', id);
   }
   update();
