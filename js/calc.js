@@ -80,7 +80,7 @@ export function recipeStats(r, equip = {}) {
     const kg = num(f.amount), lb = kg * LB_PER_KG;
     const ppg = (num(f.potential, 1.037) - 1) * 1000;
     if (isMashed(f)) { mashPts += lb * ppg; grainKg += kg; } else sugarPts += lb * ppg;
-    mcu += lb * srmToLovibond(ebcToSrm(num(f.color)));
+    mcu += lb * ebcToSrm(num(f.color)); // malt °L taken as equal to SRM, as most brewing software does
     totalKg += kg;
   }
   const points = gal > 0 ? (mashPts * eff + sugarPts) / gal : 0;
@@ -90,9 +90,11 @@ export function recipeStats(r, equip = {}) {
   const attenuation = yeasts.length ? yeasts.reduce((a, y) => a + num(y.attenuation), 0) / yeasts.length : 75;
   const fg = 1 + (points * (1 - attenuation / 100)) / 1000;
 
-  const srm = gal > 0 && mcu > 0 ? 1.4922 * Math.pow(mcu / gal, 0.6859) : 0;
-
   const postBoilVol = batch + num(eq.kettleLoss);
+
+  // Morey, over all the wort at the end of the boil (the colour is in what stays in the kettle too).
+  const colourGal = postBoilVol / L_PER_GAL;
+  const srm = colourGal > 0 && mcu > 0 ? 1.4922 * Math.pow(mcu / colourGal, 0.6859) : 0;
   const preBoilVol = postBoilVol + num(eq.boilOff) * boilTime / 60;
   const preBoilSG = 1 + (points * postBoilVol / preBoilVol) / 1000;
   const boilSG = (preBoilSG + og) / 2;

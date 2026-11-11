@@ -36,6 +36,16 @@ assert.ok(s.ibu > 30 && s.ibu < 45, `IBU plausible, got ${s.ibu}`);
 assert.equal(s.hopIbus[3], 0, 'dry hops add no IBU');
 assert.ok(s.hopIbus[2] < s.hopIbus[1], 'whirlpool below a 10 min boil addition of similar size');
 assert.ok(s.ebc > 12 && s.ebc < 22, `colour plausible, got ${s.ebc} EBC`);
+
+// Colour matches Brewfather on a Black IPA it exported: 4.5 kg Maris Otter (3 SRM), 140 g chocolate (450),
+// 100 g black patent (500), 18 L batch. Brewfather gives 22.7 SRM (44.7 EBC) with about 20 L at the end of the boil.
+{
+  const bipa = { batchSize: 18, fermentables: [
+    { type: 'grain', amount: 4.5, color: C.srmToEbc(3) },
+    { type: 'grain', amount: 0.14, color: C.srmToEbc(450) },
+    { type: 'grain', amount: 0.1, color: C.srmToEbc(500) }] };
+  near(C.recipeStats(bipa, { kettleLoss: 2 }).srm, 22.7, 0.2, 'Black IPA colour against Brewfather');
+}
 near(s.preBoilVol, 21 + 1.5 + 3.5, 0.001, 'pre-boil volume');
 near(s.mashWater + s.spargeWater - s.grainKg * 1.0, s.preBoilVol, 0.001, 'water balance');
 

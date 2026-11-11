@@ -194,7 +194,8 @@ converted to SG. `js/sources.js` is where other reading sources can be added.
 - FG: OG × average yeast attenuation. ABV: (OG − FG) × 131.25.
 - IBU: Tinseth on post-boil volume and average boil gravity. Pellets +10%, first wort +10%,
   mash hops 20%, whirlpool scaled by temperature (Malowicki), dry hops 0.
-- Colour: Morey. Stored and shown in EBC.
+- Colour: Morey, over the wort volume at the end of the boil. A malt's colour in SRM is used
+  as its Lovibond value, as Brewfather and BeerSmith do. Stored and shown in EBC.
 - Water: mash water = grain × ratio; sparge makes up the pre-boil volume after grain absorption.
 
 Everything is metric (litres, kg, g, °C, EBC). Style ranges are BJCP 2021 and the

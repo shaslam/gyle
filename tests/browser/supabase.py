@@ -66,6 +66,10 @@ with sync_playwright() as p:
     pg = b.new_page(viewport={'width':390,'height':844}, device_scale_factor=2)
     errs=[]; pg.on('pageerror', lambda e: errs.append(str(e)))
     pg.route(SB+'/**', sb)
+    # Serve an empty js/config.js, so the test types the simulated project into Settings
+    # whatever the real file holds.
+    pg.route('**/js/config.js', lambda route: route.fulfill(status=200, content_type='text/javascript',
+        body="export const SUPABASE_URL = '';\nexport const SUPABASE_KEY = '';\n"))
     U='http://localhost:8765/'
     chip=lambda: pg.inner_text('#sync-chip'); msg=lambda: pg.inner_text('#storage-msg')
     names=lambda: pg.eval_on_selector_all('#recipe-list strong','o=>o.map(x=>x.textContent)')
@@ -74,7 +78,7 @@ with sync_playwright() as p:
     print('  modes:', pg.eval_on_selector_all('#storage .seg','o=>o.map(x=>x.textContent+(x.classList.contains("on")?"*":""))'))
     pg.click('[data-act=mode][data-v=supabase]'); pg.wait_for_timeout(200)
     pg.fill('#sb-email','stu@example.com'); pg.fill('#sb-password','hunter22'); pg.click('#sb-form button[type=submit]'); pg.wait_for_timeout(200); print('  no project:', msg())
-    pg.fill('#sb-url', SB+'/'); pg.fill('#sb-key','PUBKEY')
+    pg.fill('#sb-url', SB+'/rest/v1/'); pg.fill('#sb-key','PUBKEY')  # a copied API address is cut back to the base
     pg.fill('#sb-email','stu@example.com'); pg.fill('#sb-password','hunter22'); pg.click('#sb-form button[type=submit]'); pg.wait_for_timeout(400); print('  wrong login:', msg())
     pg.click('[data-act=sb-signup]'); pg.wait_for_timeout(1500)
     print('2 signed up:', pg.inner_text('#storage .summary'), '|', msg(), '| chip:', chip())

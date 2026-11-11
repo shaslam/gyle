@@ -4,5 +4,5 @@
 // service-role (secret) key here.
 //
 // Leave both empty to enter them in Settings on each device instead.
-export const SUPABASE_URL = '';   // e.g. 'https://abcdefghijkl.supabase.co'
-export const SUPABASE_KEY = '';   // the publishable (or legacy "anon") key
+export const SUPABASE_URL = 'https://fogdtvuhiikifqyhgqgi.supabase.co';   // e.g. 'https://abcdefghijkl.supabase.co'
+export const SUPABASE_KEY = 'sb_publishable_9bQ4dsDhHLT0MNSgucd_kQ_HUYU_tuK';   // the publishable (or legacy "anon") key

@@ -18,7 +18,8 @@ export class SupabaseBackend {
   recovering = false; // true after arriving from a password-reset email
 
   get builtIn() { return !!(SUPABASE_URL && SUPABASE_KEY); }
-  get url() { return (SUPABASE_URL || this.#state.url || '').replace(/\/+$/, ''); }
+  // The project's base address. A copied API address such as .../rest/v1/ is cut back to the base.
+  get url() { return (SUPABASE_URL || this.#state.url || '').trim().replace(/\/+$/, '').replace(/\/(rest|auth)\/v1$/, ''); }
   get key() { return SUPABASE_KEY || this.#state.key || ''; }
   get configured() { return !!(this.url && this.key); }
   get user() { return this.#state.session?.user || null; }

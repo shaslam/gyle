@@ -1,7 +1,7 @@
 // BeerXML 1.0 import and export (the format BeerSmith and Brewfather both export).
-// BeerXML units: kg, litres, °C, minutes; colour in Lovibond; yield in %.
+// BeerXML units: kg, litres, °C, minutes; colour in Lovibond (read as SRM, the usual practice); yield in %.
 
-import { lovibondToSrm, srmToEbc, ebcToSrm, srmToLovibond, yieldToPotential, potentialToYield } from './units.js';
+import { srmToEbc, ebcToSrm, yieldToPotential, potentialToYield } from './units.js';
 import { blankRecipe } from './beerjson.js';
 
 // BeerSmith files often declare ISO-8859-1; decode with whatever the file says.
@@ -48,7 +48,7 @@ function recipeFromXml(x) {
     type: FERM_TYPE[txt(f, 'TYPE', 'Grain').toLowerCase()] || 'other',
     amount: round(numOf(f, 'AMOUNT')),
     potential: round(yieldToPotential(numOf(f, 'YIELD', 80))),
-    color: round(srmToEbc(lovibondToSrm(numOf(f, 'COLOR'))), 1),
+    color: round(srmToEbc(numOf(f, 'COLOR')), 1), // malt °L taken as equal to SRM, as BeerSmith and Brewfather do
   }));
 
   r.hops = kids(x, 'HOPS', 'HOP').map(h => {
@@ -120,7 +120,7 @@ export function toBeerXML(r) {
 ${tag('NAME', r.name)}${tag('VERSION', 1)}${tag('TYPE', cap(r.type || 'all grain'))}${tag('BREWER', r.author || 'Unknown')}
 ${tag('BATCH_SIZE', r.batchSize)}${tag('BOIL_SIZE', r.batchSize)}${tag('BOIL_TIME', r.boilTime)}${tag('EFFICIENCY', r.efficiency)}
 <STYLE>${tag('NAME', r.style || 'Custom')}${tag('VERSION', 1)}${tag('CATEGORY', '')}${tag('CATEGORY_NUMBER', '')}${tag('STYLE_LETTER', '')}${tag('STYLE_GUIDE', 'BJCP 2021')}${tag('TYPE', 'Ale')}</STYLE>
-<FERMENTABLES>${(r.fermentables || []).map(f => `<FERMENTABLE>${tag('NAME', f.name)}${tag('VERSION', 1)}${tag('TYPE', cap(f.type === 'honey' || f.type === 'other' ? 'adjunct' : f.type))}${tag('AMOUNT', f.amount)}${tag('YIELD', potentialToYield(f.potential).toFixed(1))}${tag('COLOR', srmToLovibond(ebcToSrm(f.color)).toFixed(1))}</FERMENTABLE>`).join('')}</FERMENTABLES>
+<FERMENTABLES>${(r.fermentables || []).map(f => `<FERMENTABLE>${tag('NAME', f.name)}${tag('VERSION', 1)}${tag('TYPE', cap(f.type === 'honey' || f.type === 'other' ? 'adjunct' : f.type))}${tag('AMOUNT', f.amount)}${tag('YIELD', potentialToYield(f.potential).toFixed(1))}${tag('COLOR', ebcToSrm(f.color).toFixed(1))}</FERMENTABLE>`).join('')}</FERMENTABLES>
 <HOPS>${(r.hops || []).map(h => `<HOP>${tag('NAME', h.name)}${tag('VERSION', 1)}${tag('ALPHA', h.alpha)}${tag('AMOUNT', (h.amount || 0) / 1000)}${tag('USE', HOP_USE_OUT[h.use] || 'Boil')}${tag('TIME', hopTime(h))}${tag('FORM', cap(h.form || 'pellet'))}</HOP>`).join('')}</HOPS>
 <YEASTS>${(r.yeasts || []).map(y => `<YEAST>${tag('NAME', y.name)}${tag('VERSION', 1)}${tag('TYPE', 'Ale')}${tag('FORM', cap(y.form || 'dry'))}${tag('AMOUNT', 0.011)}${tag('LABORATORY', y.lab)}${tag('ATTENUATION', y.attenuation)}</YEAST>`).join('')}</YEASTS>
 <MISCS>${(r.miscs || []).map(m => `<MISC>${tag('NAME', m.name)}${tag('VERSION', 1)}${tag('TYPE', cap(m.type || 'other'))}${tag('USE', MISC_USE_OUT[m.use] || 'Boil')}${tag('TIME', m.time || 0)}${tag('AMOUNT', (m.amount || 0) / 1000)}${tag('AMOUNT_IS_WEIGHT', m.unit === 'g' ? 'TRUE' : 'FALSE')}</MISC>`).join('')}</MISCS>
