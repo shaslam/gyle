@@ -604,3 +604,8 @@ dialog.photo-view .caption { margin: 10px 0 0; font-size: 14px; }
 .bdays .bday:hover circle:not(.hit), .bdays .bday:focus circle:not(.hit) { stroke-width: 2.5; }
 .bdays .bday:focus { outline: none; }
 .bdays .bday:focus-visible circle:not(.hit) { stroke: var(--gold-deep); stroke-width: 3; }
+
+/* Settings pages: a row of links under the heading. */
+.subnav { margin: 0 0 14px; }
+.subnav .seg { text-decoration: none; }
+.subnav .seg:not(.on) { background: rgb(255 250 240 / .55); border-color: var(--wall-deep); color: var(--ink); }

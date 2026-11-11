@@ -95,7 +95,7 @@ export class SupabaseBackend {
     const h = location.hash.slice(1);
     if (!/(^|&)(access_token|error_description)=/.test(h)) return null;
     const p = new URLSearchParams(h);
-    history.replaceState(null, '', location.pathname + location.search + '#settings');
+    history.replaceState(null, '', location.pathname + location.search + '#settings/storage');
     if (p.get('error_description')) return { error: p.get('error_description').replace(/\+/g, ' ') };
     try {
       const s = { access_token: p.get('access_token'), refresh_token: p.get('refresh_token'), expires_in: +p.get('expires_in') || 3600 };

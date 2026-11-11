@@ -25,7 +25,7 @@ file does not work because the code uses JavaScript modules.
 
 ## Where your data lives
 
-Settings → Storage offers three choices. In all of them the browser keeps a working copy,
+Settings → Storage offers three choices. Settings has three pages: Equipment, Water and Storage. In all of them the browser keeps a working copy,
 so the app works offline and nothing is lost mid-brew.
 
 - **This device**: the browser only.

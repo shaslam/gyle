@@ -2168,7 +2168,10 @@ const EQUIP_LABELS = {
 };
 
 let storageNote = ''; // a message to show on the Storage card the next time Settings is drawn
-function settingsView() {
+// Settings has one page per subject. The tab bar's Settings link opens the first one.
+const SETTINGS_PAGES = [['equipment', 'Equipment'], ['water', 'Water'], ['storage', 'Storage']];
+function settingsView(sub) {
+  const page = SETTINGS_PAGES.some(([k]) => k === sub) ? sub : 'equipment';
   const doc = clone(store.get('settings', 'settings') || {});
   doc.profiles = clone(profiles());
   doc.defaultProfile = defaultProfile().id;
@@ -2178,6 +2181,7 @@ function settingsView() {
   const touch = () => store.put('settings', 'settings', doc);
   const drawProfiles = () => {
     const inUse = id => store.list('recipes').filter(r => (r.data.equipment || doc.defaultProfile) === id).length;
+    if (!$('#profiles')) return;
     $('#profiles').innerHTML = doc.profiles.map((p, i) => `<div class="profile">
       <div class="row">${field({ label: 'Profile name', cls: 'w-name' }, `profiles.${i}.name`, p.name)}
         ${Object.keys(EQUIP_LABELS).map(k => field({ label: EQUIP_LABELS[k], num: 1 }, `profiles.${i}.${k}`, p[k])).join('')}</div>
@@ -2189,6 +2193,7 @@ function settingsView() {
     saveState('settings', 'settings');
   };
   const drawWaters = () => {
+    if (!$('#waters')) return;
     $('#waters').innerHTML = doc.waters.length ? doc.waters.map((w, i) => `<div class="profile">
       <div class="row">${field({ label: 'Water name', cls: 'w-name' }, `waters.${i}.name`, w.name)}</div>
       <div class="row ions-row">${C.IONS.map(k => field({ label: `${ION_LABELS[k]} ppm`, num: 1, step: 1 }, `waters.${i}.${k}`, w[k])).join('')}</div>
@@ -2283,7 +2288,7 @@ function settingsView() {
         await store.account.signOut();
         store.wipe();
         storageNote = 'Signed out. Your recipes are in your account, no longer on this device.';
-        settingsView();
+        settingsView('storage');
       },
       'sb-sync': () => store.sync(),
     },
@@ -2314,7 +2319,7 @@ function settingsView() {
       store.setMode('supabase');
       await store.sync();
       storageNote = store.status.state === 'error' ? store.status.message : 'Signed in. Changes now save to your account automatically.';
-      settingsView();
+      settingsView('storage');
     } catch (e) { say(/invalid login/i.test(e.message) ? 'That email and password do not match an account.' : e.message); }
   }
   async function newPassword() {
@@ -2359,22 +2364,26 @@ function settingsView() {
     el.innerHTML = `<div class="segs" role="group" aria-label="Where to keep your data">${seg('local', 'This device')}${seg('supabase', 'Gyle account')}${seg('git', 'GitHub repo')}</div>
       ${body}<p class="hint" id="storage-msg" role="status">${esc(storageMsg)}</p>`;
   }
-  view.innerHTML = `
-    <div class="page-head"><h1>Settings</h1></div>
-    <section class="card"><div class="sec-head"><h2>Equipment profiles</h2><button type="button" class="btn small primary" id="save-btn" data-act="save"></button></div>
+  const pages = {
+    equipment: `<section class="card"><div class="sec-head"><h2>Equipment profiles</h2></div>
       <p class="hint">One profile per setup you brew on. Each recipe picks a profile, which sets its water volumes, pre-boil gravity and IBU. New recipes start from the default.</p>
       <div id="profiles"></div>
       <div class="foot-actions"><button type="button" class="btn" data-act="add-profile">Add profile</button></div>
-    </section>
-    <section class="card"><div class="sec-head"><h2>Water profiles</h2></div>
+    </section>`,
+    water: `<section class="card"><div class="sec-head"><h2>Water profiles</h2></div>
       <p class="hint">Enter the mineral content of the water you brew with, from your supplier's report or a test kit. Recipes use the default as their starting water, and any profile here can also be picked as a target.</p>
       <div id="waters"></div>
       <div class="foot-actions"><button type="button" class="btn" data-act="add-water">Add water profile</button></div>
-    </section>
-    <section class="card"><div class="sec-head"><h2>Storage</h2></div>
+    </section>`,
+    storage: `<section class="card"><div class="sec-head"><h2>Storage</h2></div>
       <p class="hint">Where your recipes, brew logs and settings are kept. Whichever you choose, this browser keeps a working copy so Gyle still works offline.</p>
       <div id="storage"></div>
-    </section>`;
+    </section>`,
+  };
+  view.innerHTML = `
+    <div class="page-head"><h1>Settings</h1>${page === 'storage' ? '' : '<div class="actions"><button type="button" class="btn primary" id="save-btn" data-act="save"></button></div>'}</div>
+    <nav class="segs subnav" aria-label="Settings pages">${SETTINGS_PAGES.map(([k, t]) => `<a class="seg${k === page ? ' on' : ''}" href="#settings/${k}"${k === page ? ' aria-current="page"' : ''}>${t}</a>`).join('')}</nav>
+    ${pages[page]}`;
   drawProfiles();
   drawWaters();
   drawStorage();
@@ -2413,9 +2422,9 @@ function drawChip() {
 }
 
 $('#sync-chip').addEventListener('click', async () => {
-  if (!store.connected) { location.hash = '#settings'; return; }
+  if (!store.connected) { location.hash = '#settings/storage'; return; }
   if (store.dirtyCount) {
-    if (!store.canWrite) { toast(store.words.need, true); location.hash = '#settings'; return; }
+    if (!store.canWrite) { toast(store.words.need, true); location.hash = '#settings/storage'; return; }
     try { await store.push(); toast(store.words.all); } catch (e) { toast(e.message, true); }
   } else {
     await store.sync();

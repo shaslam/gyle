@@ -74,7 +74,7 @@ with sync_playwright() as p:
     chip=lambda: pg.inner_text('#sync-chip'); msg=lambda: pg.inner_text('#storage-msg')
     names=lambda: pg.eval_on_selector_all('#recipe-list strong','o=>o.map(x=>x.textContent)')
     pg.goto(U); pg.wait_for_timeout(1300); print('1 local:', chip(), names())
-    pg.goto(U+'#settings'); pg.wait_for_timeout(300)
+    pg.goto(U+'#settings/storage'); pg.wait_for_timeout(300)
     print('  modes:', pg.eval_on_selector_all('#storage .seg','o=>o.map(x=>x.textContent+(x.classList.contains("on")?"*":""))'))
     pg.click('[data-act=mode][data-v=supabase]'); pg.wait_for_timeout(200)
     pg.fill('#sb-email','stu@example.com'); pg.fill('#sb-password','hunter22'); pg.click('#sb-form button[type=submit]'); pg.wait_for_timeout(200); print('  no project:', msg())
@@ -90,16 +90,16 @@ with sync_playwright() as p:
     pg.goto(U+'#recipes'); pg.wait_for_timeout(400); pg.click('[data-act=new]'); pg.fill('#nr-name','Second'); pg.click('dialog.sheet button[type=submit]'); pg.wait_for_timeout(3300)
     rid=[k[2] for k in rows if k[1]=='recipes' and k[2]!='house-pale-ale'][0]
     pg.click('[data-act=delete]'); pg.click('[data-act=delete]'); pg.wait_for_timeout(3300); print('4 delete synced:', ('u1','recipes',rid) not in rows, names())
-    pg.goto(U+'#settings'); pg.wait_for_timeout(300); pg.click('[data-act=sb-signout]'); pg.wait_for_timeout(600)
+    pg.goto(U+'#settings/storage'); pg.wait_for_timeout(300); pg.click('[data-act=sb-signout]'); pg.wait_for_timeout(600)
     print('5 signed out:', msg(), '| chip:', chip(), '| cache recipes:', pg.evaluate("Object.keys(JSON.parse(localStorage.getItem('gyle.cache.v1')).recipes).length"))
     short[0]=True
     pg.fill('#sb-email','stu@example.com'); pg.fill('#sb-password','hunter22'); pg.click('#sb-form button[type=submit]'); pg.wait_for_timeout(1500)
     pg.goto(U+'#recipes'); pg.wait_for_timeout(500); print('6 signed back in:', names(), chip(), '| refresh used:', any('grant_type=refresh_token' in l for l in log))
     short[0]=False
-    pg.goto(U+'#settings'); pg.wait_for_timeout(300); pg.click('[data-act=sb-signout]'); pg.wait_for_timeout(600)
+    pg.goto(U+'#settings/storage'); pg.wait_for_timeout(300); pg.click('[data-act=sb-signout]'); pg.wait_for_timeout(600)
     pg.fill('#sb-email','other@example.com'); pg.fill('#sb-password','password9'); pg.click('[data-act=sb-signup]'); pg.wait_for_timeout(1500)
     pg.goto(U+'#recipes'); pg.wait_for_timeout(500); print('7 second user sees:', names(), '| their rows:', [k for k in rows if k[0]=='u2'])
-    pg.goto(U+'#settings'); pg.wait_for_timeout(300); pg.click('[data-act=sb-signout]'); pg.wait_for_timeout(500)
+    pg.goto(U+'#settings/storage'); pg.wait_for_timeout(300); pg.click('[data-act=sb-signout]'); pg.wait_for_timeout(500)
     pg.fill('#sb-email','confirm@example.com'); pg.fill('#sb-password','password9'); pg.click('[data-act=sb-signup]'); pg.wait_for_timeout(600); print('8 confirm flow:', msg())
     # arriving from an OAuth / email link
     s=session('u1','stu@example.com')

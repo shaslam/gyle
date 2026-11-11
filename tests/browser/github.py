@@ -40,7 +40,7 @@ with sync_playwright() as p:
     chip=lambda: pg.inner_text('#sync-chip')
     names=lambda: pg.eval_on_selector_all('#recipe-list .q-row','o=>o.map(x=>x.querySelector("strong").textContent+(x.querySelector("em")?" ("+x.querySelector("em").textContent+")":""))')
     pg.goto(U); pg.wait_for_timeout(1300)
-    pg.goto(U+'#settings'); pg.wait_for_timeout(300); pg.click('[data-act=mode][data-v=git]'); pg.wait_for_timeout(200)
+    pg.goto(U+'#settings/storage'); pg.wait_for_timeout(300); pg.click('[data-act=mode][data-v=git]'); pg.wait_for_timeout(200)
     pg.fill('#gh-repo','stu/data'); pg.fill('#gh-token','TOKEN'); pg.click('[data-act=connect]'); pg.wait_for_timeout(1500)
     print('connect:', pg.inner_text('#storage-msg'), '| chip:', chip())
     pg.goto(U+'#recipes'); pg.wait_for_timeout(500); print('list:', names())
