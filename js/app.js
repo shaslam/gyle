@@ -6,6 +6,8 @@ import { store } from './store.js';
 import { timer } from './timer.js';
 import { fetchThingSpeak, stableFor } from './sources.js';
 import { sheetHtml, sheetPdf } from './brewsheet.js';
+import { isBrewfatherBackup, fromBrewfatherBackup } from './brewfather.js';
+import { unzip } from './unzip.js';
 
 // ---------- helpers ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -787,7 +789,7 @@ function recipesView() {
     <div class="page-head"><h1>Recipes</h1>
       <div class="actions"><button type="button" class="btn" data-act="import">Import</button><button type="button" class="btn primary" data-act="new">New recipe</button></div>
     </div>
-    <input type="file" id="import-file" accept=".xml,.beerxml,.json,application/json,text/xml" multiple hidden>
+    <input type="file" id="import-file" accept=".xml,.beerxml,.json,.zip,application/json,text/xml,application/zip" multiple hidden>
     <div class="row list-tools">
       <label class="fld search w-name" for="q"><span>Search by name or style</span><input id="q" type="search" value="${esc(ctx.q)}"></label>
       <label class="fld search" for="sort"><span>Order</span><select id="sort">${RECIPE_SORTS.map(([v, t]) => `<option value="${v}"${v === recipeSort ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
@@ -831,12 +833,27 @@ function recipesView() {
   draw();
 }
 
+// A file chosen for import, or each file inside a zip: [{ name, bytes }].
+async function importParts(file) {
+  const buf = await file.arrayBuffer(), head = new Uint8Array(buf, 0, Math.min(4, buf.byteLength));
+  if (head[0] === 0x50 && head[1] === 0x4b) { // "PK": a zip archive
+    const parts = (await unzip(buf)).filter(p => /\.(json|xml|beerxml)$/i.test(p.name) && !/(^|\/)(__MACOSX|\.)/.test(p.name));
+    if (!parts.length) throw new Error('the zip file has no BeerXML or JSON files in it.');
+    return parts.map(p => ({ name: `${file.name}: ${p.name}`, bytes: p.bytes }));
+  }
+  return [{ name: file.name, bytes: buf }];
+}
+
 async function importFiles(files) {
-  const added = [], renamed = [];
+  const added = [], renamed = [], notes = [];
   for (const file of files) {
-    try {
-      const text = decodeXmlBytes(await file.arrayBuffer());
-      const recipes = text.trimStart().startsWith('<') ? parseBeerXML(text) : fromBeerJSON(JSON.parse(text));
+    let parts;
+    try { parts = await importParts(file); } catch (e) { toast(`${file.name}: ${e.message}`, true); continue; }
+    for (const part of parts) try {
+      const text = decodeXmlBytes(part.bytes);
+      const json = text.trimStart().startsWith('<') ? null : JSON.parse(text);
+      if (isBrewfatherBackup(json)) { notes.push(importBrewfather(json, added, renamed)); continue; }
+      const recipes = json ? fromBeerJSON(json) : parseBeerXML(text);
       for (const r of recipes) {
         const wanted = r.name;
         r.name = freeName(wanted);
@@ -848,12 +865,50 @@ async function importFiles(files) {
         added.push(id);
       }
     } catch (e) {
-      toast(`${file.name}: ${e instanceof SyntaxError ? 'not valid JSON or XML.' : e.message}`, true);
+      toast(`${part.name}: ${e instanceof SyntaxError ? 'not valid JSON or XML.' : e.message}`, true);
     }
   }
-  if (!added.length) return;
-  toast(`Imported ${added.length} recipe${added.length > 1 ? 's' : ''}.${renamed.length ? ` Some names were already in use, so these were renamed: ${renamed.join('; ')}.` : ''}`);
-  if (added.length === 1) location.hash = '#recipe/' + added[0]; else ctx.refresh?.();
+  if (!added.length && !notes.length) return;
+  const said = notes.length ? notes.join(' ') : `Imported ${added.length} recipe${added.length > 1 ? 's' : ''}.`;
+  const why = renamed.length > 3 ? ` ${renamed.length} names were already in use, so a number was added to them.`
+    : renamed.length ? ` Some names were already in use, so these were renamed: ${renamed.join('; ')}.` : '';
+  toast(said + why);
+  if (added.length === 1 && !notes.length) location.hash = '#recipe/' + added[0]; else ctx.refresh?.();
+}
+
+// A Brewfather complete backup: recipes, brew logs, equipment and water profiles. Anything imported
+// before (same Brewfather id) is left as it is, so importing a newer backup only adds what is new.
+function importBrewfather(json, added, renamed) {
+  const bf = fromBrewfatherBackup(json);
+  const count = { recipes: 0, brews: 0, profiles: 0, waters: 0, had: 0 };
+
+  const s = clone(store.get('settings', 'settings') || {});
+  const profs = clone(profiles()), waters = s.waters || [];
+  for (const p of bf.profiles) if (!profs.some(x => x.id === p.id)) { profs.push(p); count.profiles++; }
+  for (const w of bf.waters) if (!waters.some(x => x.id === w.id)) { waters.push(w); count.waters++; }
+  if (count.profiles || count.waters) {
+    store.put('settings', 'settings', { ...s, profiles: profs, defaultProfile: s.defaultProfile || profs[0].id, waters });
+  }
+
+  for (const { id, data } of bf.recipes) {
+    if (store.docs.recipes[id]) { count.had++; continue; } // imported before (or deleted since): leave it
+    const wanted = data.name;
+    data.name = freeName(wanted);
+    if (data.name !== wanted) renamed.push(`${wanted} as ${data.name}`);
+    store.put('recipes', id, data);
+    added.push(id); count.recipes++;
+  }
+  for (const { id, data } of bf.brews) {
+    if (store.docs.brews[id]) { count.had++; continue; }
+    const now = data.recipeId && store.get('recipes', data.recipeId)?.name; // the recipe's name after any renaming
+    if (now && now !== data.recipe.name && data.name.startsWith(data.recipe.name)) data.name = now + data.name.slice(data.recipe.name.length);
+    if (now) data.recipe.name = now;
+    store.put('brews', id, data);
+    count.brews++;
+  }
+  const parts = [[count.recipes, 'recipe'], [count.brews, 'brew log'], [count.profiles, 'equipment profile'], [count.waters, 'water profile']]
+    .filter(([k]) => k).map(([k, w]) => `${k} ${w}${k > 1 ? 's' : ''}`);
+  return `From Brewfather: ${parts.length ? `imported ${parts.join(', ')}.` : 'nothing new.'}${count.had ? ` ${count.had} item${count.had > 1 ? 's were' : ' was'} imported before and left as ${count.had > 1 ? 'they are' : 'it is'}.` : ''}`;
 }
 
 // ---------- recipe editor ----------

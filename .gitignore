@@ -1,0 +1,3 @@
+# Exports from other brewing software hold personal data: keep them out of this public repo.
+Brewfather_*
+*.zip

@@ -39,6 +39,8 @@ Always run `node tests/calc.test.mjs` after touching `js/calc.js`, `js/data.js` 
 | `js/calc.js` | Pure maths: OG/FG/ABV, Tinseth IBU, Morey colour, water volumes, tools, salts, mash pH |
 | `js/data.js` | Reference data: BJCP 2021 styles, fermentables (with substitution `group`), hops (alpha, `group`, 8-axis `aroma`), yeasts, water targets |
 | `js/beerjson.js`, `js/beerxml.js`, `js/units.js` | Format converters. Internal recipe model <-> BeerJSON; BeerXML import/export |
+| `js/brewfather.js` | Brewfather complete backup (`backup.json` in a zip) -> recipes, brew logs, equipment and water profiles. Pure: `importBrewfather()` in `app.js` stores the result. Ids are `bf-…` from the Brewfather id, so a second import skips what is there |
+| `js/unzip.js` | Minimal zip reader (stored and deflate entries, via `DecompressionStream`) |
 | `js/store.js` | Local working copy (localStorage) and syncing. Backend-agnostic |
 | `js/backend-git.js` | Storage backend: GitHub contents API, one commit per save |
 | `js/backend-supabase.js` | Storage backend: Supabase Auth + a `documents` table over plain `fetch` (no SDK) |
@@ -87,6 +89,17 @@ commit, conflict retry, delete; ThingSpeak fetch, hourly down-sampling, stable-g
 - GitHub commits with a real token (Stuart was about to try this).
 - ThingSpeak from a browser (assumes its API allows cross-origin reads).
 - Timer notifications on a real phone.
+
+### Brewfather backup, what is in it
+
+`data.recipes` (colours in SRM, hop `use` Boil / First Wort / Aroma (= hopstand) / Dry Hop, `temp` often
+null: the equipment's `hopstandTemperature` applies), `data.batches` (notes, measured values, a
+recipe snapshot), `data.profiles` (equipment, water), `data.inventory`, and
+`completeBackup.documents` (Firestore paths: `batches/<id>/readings_accumulated/…` hold iSpindel
+readings every 15 min, `recipes/<id>/users_recipes_versions/…` hold version snapshots).
+`settings.recipe.fg` holds Brewfather's FG mash-temperature slope (centre 67.5 °C). Stuart's
+iSpindel posts to Brewfather (`data/iSpindel` documents), which matters for the iSpindel plan below.
+Gyle gives 0 IBU to 0-minute boil hops. Brewfather gives them some, so imported recipes with them read lower in Gyle.
 
 ## Things flagged to Stuart as "from memory, check them"
 

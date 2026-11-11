@@ -138,5 +138,92 @@ for (const m of raw.matchAll(/<< \/Length (\d+) >>\nstream\n/g)) {
   assert.equal(raw.slice(m.index + m[0].length + +m[1], m.index + m[0].length + +m[1] + 10), '\nendstream', 'stream length');
 }
 assert.match(raw, /\(House Pale Ale \\\(v2\\\)\) Tj/, 'brackets in text are escaped');
+
+// ---- Brewfather complete backup ----
+{
+  const eqBf = { _id: 'EqAbCdEf123', name: 'Kettle', batchSize: 23, brewhouseEfficiency: 64, efficiency: 60, boilTime: 60, boilOffPerHr: 2,
+    trubChillerLoss: 2, mashTunDeadSpace: 1.5, grainAbsorptionRate: 0.96, waterGrainRatio: 3, grainTemperature: 20, hopstandTemperature: 85 };
+  const tap = { _id: 'TapWater99', name: 'Tap', type: 'source', calcium: 18, magnesium: 3.7, sodium: 10.4, chloride: 34.1, sulfate: 31.7, bicarbonate: 43 };
+  const bfRecipe = {
+    _id: 'RecIpe0001xyz', name: 'Test Pale', type: 'All Grain', batchSize: 23, boilTime: 60, efficiency: 64, carbonation: 2.4,
+    style: { name: 'American Pale Ale' }, equipment: eqBf, _created: { _seconds: 1674235119 }, _timestamp_ms: 1700000000000, notes: 'Good',
+    fermentables: [{ name: 'Pale Ale Malt', type: 'Grain', amount: 5, potential: 1.037, color: 3 }, { name: 'Malt Extract', type: 'Liquid Extract', amount: 0.5, potential: 1.036, color: 4 }],
+    hops: [
+      { name: 'Magnum', type: 'Pellet', use: 'Boil', time: 60, alpha: 12, amount: 15 },
+      { name: 'Cascade', type: 'Pellet', use: 'Aroma', time: 20, temp: null, alpha: 6, amount: 65 },
+      { name: 'Cascade', type: 'Whole', use: 'Dry Hop', time: 3, alpha: 6, amount: 60 },
+    ],
+    yeasts: [{ name: 'Safale American', productId: 'US-05', laboratory: 'Fermentis', form: 'Dry', unit: 'pkg', amount: 2, attenuation: 78 }],
+    miscs: [
+      { name: 'Gypsum (CaSO4)', type: 'Water Agent', use: 'Mash', unit: 'g', amount: 4, waterAdjustment: true },
+      { name: 'Protafloc', type: 'Fining', use: 'Boil', unit: 'items', amount: 1, time: 15 },
+      { name: 'Nutrient', type: 'Other', use: 'Boil', unit: 'tsp', amount: 1, time: 10 },
+    ],
+    mash: { steps: [{ name: 'Sacch', stepTemp: 68, stepTime: 60 }] },
+    fermentation: { steps: [{ type: 'Primary', stepTemp: 19, stepTime: 14 }] },
+    water: { source: tap, target: { _id: 'OneOff', name: 'Style - General' },
+      mashAdjustments: { calciumSulfate: 4, calciumChloride: 1, acids: [{ type: 'lactic', concentration: 80, amount: 2 }] },
+      enableSpargeAdjustments: true, spargeAdjustments: { calciumSulfate: 1.5 }, enableAcidAdjustments: true },
+  };
+  const backup = {
+    _type: 'Brewfather_Export_User_1',
+    data: {
+      recipes: [bfRecipe],
+      batches: [{ _id: 'BatchAAAA1111', batchNo: 7, name: 'Batch', status: 'Completed', brewDate: Date.UTC(2025, 0, 18), bottlingDate: Date.UTC(2025, 1, 1),
+        measuredOg: 1.052, measuredBatchSize: 22, tasteRating: 83, recipe: bfRecipe,
+        notes: [{ timestamp: Date.UTC(2025, 0, 20), status: 'Fermenting', note: 'Krausen up' }, { timestamp: Date.UTC(2025, 0, 18), status: 'Brewing', note: '' }] }],
+      profiles: { equipment: [eqBf], water: [tap, { _id: 'default-hoppy', name: 'Hoppy', type: 'target' }] },
+    },
+    completeBackup: { documents: [{ path: 'batches/BatchAAAA1111/readings_accumulated/x', data: { data: {
+      a: { sg: 1.0501, temp: 20, battery: 4.1, time: Date.UTC(2025, 0, 19, 10, 5) },
+      b: { sg: 1.0499, temp: 20.2, battery: 4.1, time: Date.UTC(2025, 0, 19, 10, 50) },
+      c: { sg: 1.2137, temp: 22, battery: 4, time: Date.UTC(2025, 0, 19, 11, 5) }, // out of the beer: ignored
+    } } }] },
+  };
+  const { fromBrewfatherBackup } = await import('../js/brewfather.js');
+  const bf = fromBrewfatherBackup(backup);
+  const r = bf.recipes[0].data;
+  assert.equal(bf.recipes[0].id, 'bf-test-pale-recipe00', 'stable recipe id from the Brewfather id');
+  assert.deepEqual(r.hops.map(h => [h.use, h.time, h.temp ?? null, h.form]), [['boil', 60, null, 'pellet'], ['whirlpool', 20, 85, 'pellet'], ['dry hop', 3, null, 'leaf']],
+    'hopstand becomes a whirlpool at the equipment hopstand temperature');
+  assert.deepEqual(r.fermentables.map(f => [f.type, f.color]), [['grain', 5.9], ['extract', 7.9]], 'fermentable types, SRM to EBC');
+  assert.equal(r.yeasts[0].name, 'Safale American (US-05)');
+  assert.equal(r.yeasts[0].amount, 2);
+  assert.deepEqual(r.miscs.map(m => [m.name, m.unit, m.amount]), [['Protafloc', 'each', 1], ['Nutrient', 'ml', 4.93]], 'water calculator rows dropped, units converted');
+  assert.deepEqual(r.water, { source: 'bf-tapwater', salts: { gypsum: 5.5, cacl2: 1 }, acid: { type: 'lactic80', ml: 2 } }, 'water: mash plus sparge salts, one-off target left out');
+  assert.equal(r.equipment, 'bf-eqabcdef');
+  assert.deepEqual([r.created, r.modified], ['2023-01-20', '2023-11-14']);
+  assert.deepEqual(bf.profiles[0], { id: 'bf-eqabcdef', name: 'Kettle', batchSize: 23, efficiency: 64, boilTime: 60, boilOff: 2, kettleLoss: 2, mashLoss: 1.5, absorption: 0.96, mashRatio: 3, grainTemp: 20 });
+  assert.deepEqual(bf.waters.map(w => w.id), ['bf-tapwater'], 'source water imported, built-in target not used by a recipe left out');
+  const b = bf.brews[0].data;
+  assert.equal(bf.brews[0].id, 'bf-2025-01-18-test-pale-batchaaa');
+  assert.deepEqual([b.name, b.status, b.brewDate, b.packagedDate, b.recipeId, b.rating], ['Test Pale #7', 'finished', '2025-01-18', '2025-02-01', 'bf-test-pale-recipe00', 4]);
+  assert.deepEqual([b.measured.og, b.measured.fermenterVol, b.measured.fg], [1.052, 22, null]);
+  assert.equal(b.notes, '2025-01-20 (Fermenting): Krausen up', 'notes in date order, empty ones left out');
+  assert.deepEqual(b.deviceReadings, [{ t: '2025-01-19T10:00:00Z', sg: 1.05, temp: 20.1, battery: 4.1 }], 'readings: one per hour, bad ones dropped');
+  // the recipe survives the trip through BeerJSON storage
+  const back = fromBeerJSON(toBeerJSON(r))[0];
+  assert.deepEqual([back.hops, back.water, back.equipment], [r.hops, r.water, r.equipment], 'imported recipe round trip');
+
+  // the zip reader, on a zip built here with one stored and one deflated file
+  const { deflateRawSync, crc32 } = await import('node:zlib');
+  const files = [['a.txt', Buffer.from('plain'), 0], ['backup.json', Buffer.from(JSON.stringify(backup)), 8]];
+  const local = [], central = []; let off = 0;
+  for (const [name, content, method] of files) {
+    const body = method ? deflateRawSync(content) : content, nm = Buffer.from(name), crc = crc32 ? crc32(content) : 0;
+    const h = Buffer.alloc(30); h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(20, 4); h.writeUInt16LE(method, 8); h.writeUInt32LE(crc, 14);
+    h.writeUInt32LE(body.length, 18); h.writeUInt32LE(content.length, 22); h.writeUInt16LE(nm.length, 26);
+    const c = Buffer.alloc(46); c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(20, 6); c.writeUInt16LE(method, 10); c.writeUInt32LE(crc, 16);
+    c.writeUInt32LE(body.length, 20); c.writeUInt32LE(content.length, 24); c.writeUInt16LE(nm.length, 28); c.writeUInt32LE(off, 42);
+    local.push(h, nm, body); central.push(c, nm); off += 30 + nm.length + body.length;
+  }
+  const dir = Buffer.concat(central), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10); end.writeUInt32LE(dir.length, 12); end.writeUInt32LE(off, 16);
+  const { unzip } = await import('../js/unzip.js');
+  const got = await unzip(Buffer.concat([...local, dir, end]));
+  assert.deepEqual(got.map(f => f.name), ['a.txt', 'backup.json']);
+  assert.equal(Buffer.from(got[0].bytes).toString(), 'plain');
+  assert.equal(fromBrewfatherBackup(JSON.parse(Buffer.from(got[1].bytes).toString())).recipes.length, 1, 'zip: deflated backup reads back');
+}
 console.log('All checks passed.');
 console.log(`House Pale Ale: OG ${s.og.toFixed(3)}  FG ${s.fg.toFixed(3)}  ABV ${s.abv.toFixed(1)}  IBU ${s.ibu.toFixed(0)}  EBC ${s.ebc.toFixed(0)}`);

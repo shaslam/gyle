@@ -77,6 +77,8 @@ js/calc.js          all the brewing maths
 js/data.js          styles, malts, hops and yeasts offered in the editor
 js/beerjson.js      BeerJSON <-> the app's model
 js/beerxml.js       BeerXML import and export
+js/brewfather.js    Brewfather complete backup import
+js/unzip.js         reads zip files (for the Brewfather backup)
 js/store.js         local working copy and syncing
 js/backend-git.js   storage backend: GitHub repo
 js/backend-supabase.js  storage backend: Supabase account (sign-in + documents table)
@@ -187,6 +189,23 @@ converted to SG. `js/sources.js` is where other reading sources can be added.
 
 - BeerSmith: File → Export → BeerXML.
 - Brewfather: open a recipe → Export → BeerXML.
+- Brewfather, everything at once: in Brewfather, make a complete backup, then import the zip file.
+
+A Brewfather complete backup brings in these items:
+
+- every recipe, with hopstands as whirlpool additions at the hopstand temperature
+- the water salts and acid from Brewfather's water calculator, in each recipe's Water card
+- every batch as a brew log, with its notes, OG, volume, rating and iSpindel or Tilt readings
+- your equipment profiles, and the water profiles that you made or that a recipe uses
+
+Gyle leaves out the inventory, the device settings, the calendar and Brewfather's recipe
+version history. Brewfather's version copies are the same as the recipe in every backup
+checked so far. If you import a newer backup later, Gyle adds only what is new. It does
+not change a recipe or a brew log that came from an earlier import.
+
+Brewfather gives IBU to hops added at 0 minutes, because they stay in hot wort after
+the boil. Gyle gives them none, so those recipes show fewer IBU in Gyle. To count them,
+change those hops to whirlpool.
 
 ## Calculations
 
