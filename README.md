@@ -137,6 +137,13 @@ recipe. Renaming a version renames all its versions, and an imported recipe whos
 already in use gets a number added ("Best Bitter 2"). It starts as a copy at version 1 and links back to the
 recipe it was based on.
 
+## Brew days
+
+The Brews page has a Brew days card with one row per year and one dot per brew, in the colour
+of the beer. Gaps in brewing show as empty stretches. Above the chart are the number of brews,
+the brews in the last 12 months, the longest gap and the time since the last brew. To read a
+dot, hover over it or select it with the keyboard. Tap a dot to open its brew log.
+
 ## Brew sheets
 
 **Brew sheet** on a recipe or a brew log opens a sheet for brew day: the targets,

@@ -588,3 +588,18 @@ dialog.photo-view .caption { margin: 10px 0 0; font-size: 14px; }
 @media (max-width: 384px) {
   .brand-sub { display: none; }
 }
+
+/* Brew days: one row per year, a dot per brew. */
+.bd-facts { margin: 8px 0 6px; font-size: 13px; }
+.bd-readout { height: 2.9em; margin: 4px 0 0; font-size: 13px; line-height: 1.45; color: var(--muted); overflow: hidden; } /* fixed height: the chart must not move under the pointer */
+.bd-readout b { color: var(--ink); font-weight: 700; }
+.bdays { display: block; width: 100%; max-width: 640px; height: auto; }
+.bdays text { font: 10px var(--font-mono); fill: var(--muted); }
+.bdays .track { fill: var(--line); opacity: .55; }
+.bdays .track.future { opacity: .2; }
+.bdays .mdiv { stroke: var(--cream); stroke-width: 1.5; }
+.bdays .today { stroke: var(--ink); stroke-width: 1.5; }
+.bdays .bday circle { stroke: var(--ink); stroke-width: 1.5; }
+.bdays .bday:hover circle, .bdays .bday:focus circle { stroke-width: 3; }
+.bdays .bday:focus { outline: none; }
+.bdays .bday:focus-visible circle { stroke: var(--gold-deep); stroke-width: 3.5; }

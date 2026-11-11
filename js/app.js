@@ -1458,6 +1458,78 @@ const clock = ms => {
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 };
 
+// Brew days: one row per year (newest at the top), a dot in the beer's colour on each brew date,
+// so gaps in brewing show at a glance. `items` is [{ id, name, date: 'YYYY-MM-DD', hex }].
+function brewDaysChart(items) {
+  const list = items.filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x.date)).sort((a, b) => a.date.localeCompare(b.date));
+  if (!list.length) return null;
+  const DAY = 864e5, ms = d => Date.parse(d + 'T12:00:00Z'), now = new Date(), todayStr = today();
+  const span = d => (d < 60 ? `${d} days` : `${Math.round(d / 30.44)} months`);
+  const nice = d => new Date(ms(d)).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  const month = d => new Date(ms(d)).toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+  list.forEach((x, i) => { x.after = i ? Math.round((ms(x.date) - ms(list[i - 1].date)) / DAY) : null; });
+
+  // Figures under the title: how many, how recent, the longest gap.
+  const since = Math.round((ms(todayStr) - ms(list.at(-1).date)) / DAY);
+  const yearAgo = new Date(now); yearAgo.setFullYear(now.getFullYear() - 1);
+  const lastYear = list.filter(x => ms(x.date) >= yearAgo.getTime()).length;
+  const longest = list.reduce((best, x, i) => (x.after != null && x.after > (best?.days || 0) ? { days: x.after, from: list[i - 1].date, to: x.date } : best), null);
+  const facts = [
+    `${list.length} ${list.length === 1 ? 'brew' : 'brews'} since ${month(list[0].date)}`,
+    `${lastYear} in the last 12 months`,
+    longest ? `longest gap ${span(longest.days)} (${month(longest.from)} to ${month(longest.to)})` : '',
+    since > 0 ? `last brew ${span(since)} ago${longest && since > longest.days ? ', the longest gap yet' : ''}` : since === 0 ? 'brewed today' : '',
+  ].filter(Boolean);
+
+  const W = 340, L = 34, R = 8, TOP = 16, ROW = 26, y0 = +list[0].date.slice(0, 4), yN = Math.max(now.getFullYear(), +list.at(-1).date.slice(0, 4));
+  const years = []; for (let y = yN; y >= y0; y--) years.push(y);
+  const H = TOP + years.length * ROW + 4, X = (L + 0), TW = W - L - R;
+  const xOf = d => { const y = +d.slice(0, 4), start = Date.UTC(y, 0, 1), end = Date.UTC(y + 1, 0, 1); return X + (ms(d) - start) / (end - start) * TW; };
+  const rowY = y => TOP + years.indexOf(y) * ROW + ROW / 2;
+  const months = 'JFMAMJJASOND'.split('');
+  const nowX = xOf(todayStr);
+  let svg = months.map((m, i) => `<text class="mlabel" x="${(X + (i + 0.5) * TW / 12).toFixed(1)}" y="10" text-anchor="middle">${m}</text>`).join('');
+  for (const y of years) {
+    const cy = rowY(y), future = y === now.getFullYear() ? nowX : y > now.getFullYear() ? X : X + TW;
+    svg += `<text class="ylabel" x="${L - 6}" y="${cy + 3.5}" text-anchor="end">${y}</text>
+      <rect class="track" x="${X}" y="${cy - 7}" width="${(future - X).toFixed(1)}" height="14" rx="3"/>
+      ${future < X + TW ? `<rect class="track future" x="${future.toFixed(1)}" y="${cy - 7}" width="${(X + TW - future).toFixed(1)}" height="14" rx="3"/>` : ''}
+      ${months.slice(1).map((_, i) => `<line class="mdiv" x1="${(X + (i + 1) * TW / 12).toFixed(1)}" x2="${(X + (i + 1) * TW / 12).toFixed(1)}" y1="${cy - 7}" y2="${cy + 7}"/>`).join('')}`;
+    if (y === now.getFullYear()) svg += `<line class="today" x1="${nowX.toFixed(1)}" x2="${nowX.toFixed(1)}" y1="${cy - 10}" y2="${cy + 10}"/>`;
+  }
+  // Brews close together in one row are nudged up and down so each dot can be seen and tapped.
+  let prev = null, flip = 1;
+  const dots = list.map(x => {
+    const y = +x.date.slice(0, 4), cx = xOf(x.date);
+    let cy = rowY(y);
+    if (prev && prev.y === y && cx - prev.cx < 11) { flip = -flip; cy += flip * 5; } else flip = 1;
+    prev = { y, cx };
+    return `<a href="#brew/${esc(x.id)}" class="bday" data-i="${list.indexOf(x)}" aria-label="${esc(x.name)}, ${esc(nice(x.date))}"><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6.5" fill="${x.hex}"/></a>`;
+  }).join('');
+  const html = `<div class="sec-head"><h2>Brew days</h2></div>
+    <p class="bd-facts">${esc(facts.map(f => f[0].toUpperCase() + f.slice(1)).join('. '))}.</p>
+    <svg class="bdays" viewBox="0 0 ${W} ${H}" role="group" aria-label="Brew days by year">${svg}${dots}</svg>
+    <p class="bd-readout" aria-live="polite"></p>
+    <p class="hint">One dot per brew, in the colour of the beer. Tap a dot to open the brew.</p>`;
+  function wire(root) {
+    const out = root.querySelector('.bd-readout');
+    const show = i => {
+      const x = list[i];
+      const latest = !x;
+      const y = x || list.at(-1);
+      out.innerHTML = `${latest ? 'Latest: ' : ''}<b>${esc(y.name)}</b> · ${esc(nice(y.date))}${y.after != null ? ` · ${span(y.after)} after the brew before` : ' · the first brew'}`;
+    };
+    show(-1);
+    root.querySelectorAll('.bday').forEach(a => {
+      a.addEventListener('pointerenter', () => show(+a.dataset.i));
+      a.addEventListener('focus', () => show(+a.dataset.i));
+      a.addEventListener('pointerleave', () => show(-1));
+      a.addEventListener('blur', () => show(-1));
+    });
+  }
+  return { html, wire };
+}
+
 function brewsView() {
   const recipes = queued(latestOnly(store.list('recipes'))).filter(x => statusOf(x.data) !== 'archived'); // newest versions, in queue order
   const nextUp = recipes.find(r => r.data.status === 'ready')?.id; // first ready recipe is preselected
@@ -1475,6 +1547,7 @@ function brewsView() {
     ${recipes.length ? `<div class="card"><div class="row">
       <label class="fld w-name" for="brew-recipe"><span>Start a brew from</span><select id="brew-recipe">${recipes.map(r => `<option value="${r.id}"${r.id === nextUp ? ' selected' : ''}>${esc(vName(r.data))}${r.data.status === 'ready' ? '' : ' (in planning)'}</option>`).join('')}</select></label>
       <button type="button" class="btn primary" data-act="new">Start brew</button></div></div>` : ''}
+    <section class="card" id="brew-days" hidden></section>
     <div class="list">${brews.length ? brews.map(({ id, data: b, dirty }) => {
       const m = b.measured || {}, typed = [...(b.readings || [])].filter(x => x.sg).sort((a, c) => (a.date || '').localeCompare(c.date || '')).at(-1);
       const auto = inBeer(b.deviceReadings).at(-1), last = auto && (!typed || auto.t.slice(0, 10) >= (typed.date || '')) ? auto : typed;
@@ -1487,6 +1560,9 @@ function brewsView() {
       </a>`;
     }).join('') : `<div class="empty-state"><h2>No brews logged</h2><p>${recipes.length ? 'Pick a recipe above to start a brew. It keeps a snapshot of the recipe, a brew-day checklist, your measurements and gravity readings.' : 'Create a recipe first, then start a brew from it.'}</p></div>`}</div>`;
   loadPhotos(view);
+  const days = brewDaysChart(brews.map(({ id, data: b }) => ({ id, name: b.name, date: b.brewDate || '', hex: C.srmToHex(C.recipeStats(b.recipe, b.equipment || equipFor(b.recipe)).srm) })));
+  const bd = $('#brew-days');
+  if (days) { bd.innerHTML = days.html; bd.hidden = false; days.wire(bd); }
 }
 
 // Brews imported from Brewfather before the timeline existed keep their dated notes as text
