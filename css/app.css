@@ -64,6 +64,8 @@ code { font-family: var(--font-mono); font-size: .92em; }
 }
 .brand { display: flex; align-items: center; gap: 9px; text-decoration: none; color: var(--gold); font: 400 20px/1 var(--font-display); letter-spacing: .06em; margin-right: auto; }
 .brand svg { width: 26px; height: 26px; }
+.brand-text { display: flex; flex-direction: column; gap: 3px; }
+.brand-sub { font: 600 9.5px/1 var(--font-body); font-stretch: 85%; letter-spacing: .1em; text-transform: uppercase; color: var(--on-green-muted); white-space: nowrap; }
 .sync {
   font: 500 12px/1 var(--font-mono); color: inherit; background: transparent;
   border: 1px solid rgb(243 234 211 / .35); border-radius: 999px;
@@ -581,3 +583,8 @@ input.sr:focus-visible + .file-btn { outline: 3px solid var(--gold); outline-off
 dialog.photo-view { max-width: min(900px, calc(100vw - 24px)); }
 dialog.photo-view img.big { width: 100%; max-height: 72vh; object-fit: contain; margin-top: 10px; border-radius: 8px; background: none; }
 dialog.photo-view .caption { margin: 10px 0 0; font-size: 14px; }
+
+/* Narrow phones: no room for the header subtitle beside the status chip. */
+@media (max-width: 370px) {
+  .brand-sub { display: none; }
+}

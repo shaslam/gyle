@@ -2345,11 +2345,11 @@ function drawTimerChip() {
   chip.textContent = `${st.segments[st.seg].name} ${st.done ? 'done' : clock(timer.remaining())}`;
 }
 // The browser tab shows the countdown while the timer runs, so it can be read from another tab.
-const BASE_TITLE = document.title;
+const BASE_TITLE = document.title, SHORT_TITLE = 'Gyle'; // the timer uses the short name, so the time stays visible
 function drawTabTitle() {
   const st = timer.state, seg = st?.segments[st.seg];
-  const title = timer.running && seg ? `${clock(timer.remaining())} ${seg.name} · ${BASE_TITLE}`
-    : st?.started && st.done && seg ? `${seg.name} done · ${BASE_TITLE}` : BASE_TITLE;
+  const title = timer.running && seg ? `${clock(timer.remaining())} ${seg.name} · ${SHORT_TITLE}`
+    : st?.started && st.done && seg ? `${seg.name} done · ${SHORT_TITLE}` : BASE_TITLE;
   if (document.title !== title) document.title = title;
 }
 timer.on((kind, payload) => {
