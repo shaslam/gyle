@@ -160,7 +160,7 @@ Each brew log has a timer with one segment per mash step, one for the boil (with
 alert for every hop and kettle addition) and one per whirlpool stand. An alert beeps,
 vibrates the phone, shows a banner in the app and, if you allow it, sends a browser
 notification. The countdown survives a reload and keeps running while you use other
-parts of the app.
+parts of the app. While the timer runs, the browser tab title shows the time left and the step.
 
 Browsers stop web pages when the phone is locked, so alerts only fire while the app is
 open: leave "Keep the screen on" ticked on brew day. On iPhone, notifications need the

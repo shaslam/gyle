@@ -2055,8 +2055,17 @@ function drawTimerChip() {
   chip.className = 'tchip' + (timer.running ? ' run' : st.done ? ' done' : '');
   chip.textContent = `${st.segments[st.seg].name} ${st.done ? 'done' : clock(timer.remaining())}`;
 }
+// The browser tab shows the countdown while the timer runs, so it can be read from another tab.
+const BASE_TITLE = document.title;
+function drawTabTitle() {
+  const st = timer.state, seg = st?.segments[st.seg];
+  const title = timer.running && seg ? `${clock(timer.remaining())} ${seg.name} · ${BASE_TITLE}`
+    : st?.started && st.done && seg ? `${seg.name} done · ${BASE_TITLE}` : BASE_TITLE;
+  if (document.title !== title) document.title = title;
+}
 timer.on((kind, payload) => {
   drawTimerChip();
+  drawTabTitle();
   if (kind === 'alert') toast(`${payload.title}. ${payload.body}`, 'alert');
   ctx.timer?.(kind);
 });
@@ -2086,6 +2095,7 @@ const arrived = await store.account.takeRedirect();
 if (arrived?.ok) store.setMode('supabase');
 drawChip();
 drawTimerChip();
+drawTabTitle();
 route();
 if (arrived?.error) toast(`Sign-in did not complete: ${arrived.error}`, true);
 else if (arrived?.recovering) toast('Choose a new password in Settings.');
