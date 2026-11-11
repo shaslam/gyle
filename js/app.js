@@ -429,12 +429,12 @@ function saveState(kind, id) {
   if (!b) return;
   const dirty = store.isDirty(kind, id);
   b.disabled = !dirty || !store.canWrite;
-  b.textContent = !store.canWrite ? 'Saved on this device' : dirty ? 'Commit to repo' : 'In the repo';
+  b.textContent = !store.canWrite ? 'Saved on this device' : dirty ? store.words.save : store.words.saved;
   const r = $('#revert-btn');
   if (r) r.hidden = !(dirty && store.canWrite);
 }
 async function commit(kind, id) {
-  try { await store.push(kind, id); toast('Committed to the repo.'); } catch (e) { toast(e.message, true); }
+  try { await store.push(kind, id); toast(store.words.done); } catch (e) { toast(e.message, true); }
 }
 
 // ---------- view plumbing ----------
@@ -448,6 +448,7 @@ view.addEventListener('input', e => {
   ctx.update?.();
 });
 view.addEventListener('change', e => ctx.change?.(e.target));
+view.addEventListener('submit', e => { e.preventDefault(); ctx.submit?.(e.target); });
 view.addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
   const fn = b && ctx.actions?.[b.dataset.act];
@@ -588,12 +589,12 @@ function recipesView() {
         ${canDrag ? `<button type="button" class="grip" aria-label="Move ${esc(data.name)}, now number ${i + 1} in the queue. Drag, or use the up and down arrow keys."><b>${i + 1}</b><svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true"><g fill="currentColor"><circle cx="2" cy="2" r="1.6"/><circle cx="8" cy="2" r="1.6"/><circle cx="2" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="2" cy="14" r="1.6"/><circle cx="8" cy="14" r="1.6"/></g></svg></button>` : ''}
         <a class="item" href="#recipe/${id}">
         ${pint(C.srmToHex(s.srm), 34)}
-        <span class="item-main">${id === nextId ? '<span class="next-tag">Next brew</span>' : ''}<strong>${esc(data.name)}</strong><small>${esc(data.style || 'No style')} · ${n(data.batchSize, 0)} L${dirty ? ' · <em>uncommitted</em>' : ''}</small></span>
+        <span class="item-main">${id === nextId ? '<span class="next-tag">Next brew</span>' : ''}<strong>${esc(data.name)}</strong><small>${esc(data.style || 'No style')} · ${n(data.batchSize, 0)} L${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small></span>
         <span class="pill ${isReady(data) ? 's-finished' : ''}">${isReady(data) ? 'Ready' : 'Planning'}</span>
         <span class="item-stats"><span><b>${sg(s.og)}</b> OG</span><span><b>${n(s.ibu, 0)}</b> IBU</span><span><b>${n(s.abv)}</b> %</span></span>
       </a></div>`;
     }).join('') : all.length ? '<p class="empty">No recipes match.</p>'
-      : `<div class="empty-state"><h2>No recipes yet</h2><p>Start a new recipe, or import BeerXML or BeerJSON files exported from BeerSmith or Brewfather.${store.connected ? '' : ' Connect your repo in Settings to keep them in git.'}</p></div>`;
+      : `<div class="empty-state"><h2>No recipes yet</h2><p>Start a new recipe, or import BeerXML or BeerJSON files exported from BeerSmith or Brewfather.${store.connected ? '' : ' Choose where to keep them in Settings.'}</p></div>`;
   }
   ctx.refresh = draw;
   draw();
@@ -616,7 +617,7 @@ async function importFiles(files) {
     }
   }
   if (!added.length) return;
-  toast(`Imported ${added.length} recipe${added.length > 1 ? 's' : ''}. Review, then commit.`);
+  toast(`Imported ${added.length} recipe${added.length > 1 ? 's' : ''}.`);
   if (added.length === 1) location.hash = '#recipe/' + added[0]; else ctx.refresh?.();
 }
 
@@ -964,7 +965,7 @@ function brewsView() {
       const fg = m.fg || last?.sg;
       return `<a class="item" href="#brew/${id}">
         ${pint(C.srmToHex(C.recipeStats(b.recipe, b.equipment || equipFor(b.recipe)).srm), 34)}
-        <span class="item-main"><strong>${esc(b.name)}</strong><small>${esc(b.brewDate || 'no date')}${dirty ? ' · <em>uncommitted</em>' : ''}</small></span>
+        <span class="item-main"><strong>${esc(b.name)}</strong><small>${esc(b.brewDate || 'no date')}${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small></span>
         <span class="pill s-${b.status.replace(' ', '-')}">${esc(b.status)}</span>
         <span class="item-stats"><span><b>${sg(m.og)}</b> OG</span><span><b>${sg(fg)}</b> SG</span><span><b>${m.og && fg ? n(C.abv(m.og, fg)) : '–'}</b> %</span></span>
       </a>`;
@@ -1048,7 +1049,7 @@ function brewView(id) {
       try { key ? localStorage.setItem('gyle.tskey.' + channel, key) : localStorage.removeItem('gyle.tskey.' + channel); } catch { /* key just is not remembered */ }
       const changed = JSON.stringify(b.deviceReadings || []) !== JSON.stringify(out.readings);
       if (changed) { b.deviceReadings = out.readings; ctx.touch(); }
-      deviceMsg = out.readings.length ? `Fetched ${out.raw} readings${b.brewDate ? ` since ${b.brewDate}` : ''}.${changed ? ' Commit to keep them in the repo.' : ' Nothing new.'}` : `The channel has no gravity readings${b.brewDate ? ` since ${b.brewDate}` : ''} yet.`;
+      deviceMsg = out.readings.length ? `Fetched ${out.raw} readings${b.brewDate ? ` since ${b.brewDate}` : ''}.${changed ? ' They are saved with this brew log.' : ' Nothing new.'}` : `The channel has no gravity readings${b.brewDate ? ` since ${b.brewDate}` : ''} yet.`;
     } catch (e) {
       if (e.fields) deviceFields = e.fields;
       if (!quiet || b.deviceReadings?.length) deviceMsg = e.message;
@@ -1266,14 +1267,14 @@ const EQUIP_LABELS = {
   kettleLoss: 'Kettle loss L', mashLoss: 'Mash tun loss L', absorption: 'Absorption L/kg', mashRatio: 'Mash ratio L/kg', grainTemp: 'Grain temp °C',
 };
 
+let storageNote = ''; // a message to show on the Storage card the next time Settings is drawn
 function settingsView() {
   const doc = clone(store.get('settings', 'settings') || {});
   doc.profiles = clone(profiles());
   doc.defaultProfile = defaultProfile().id;
   delete doc.equipment; // older single-profile settings become the first profile
   doc.waters ??= [];
-  const g = store.gh;
-  const val = id => $('#' + id).value.trim();
+  const val = id => ($('#' + id)?.value ?? '').trim();
   const touch = () => store.put('settings', 'settings', doc);
   const drawProfiles = () => {
     const inUse = id => store.list('recipes').filter(r => (r.data.equipment || doc.defaultProfile) === id).length;
@@ -1334,27 +1335,130 @@ function settingsView() {
         touch(); drawProfiles();
         toast('Profile deleted. Recipes that used it now use the default.');
       },
+      // ---- storage ----
+      mode(btn) {
+        if (btn.dataset.v === 'local') store.detach();
+        store.setMode(btn.dataset.v);
+        storageMsg = '';
+        drawStorage();
+        if (store.connected) store.sync();
+      },
       async connect() {
         const [owner, repo] = val('gh-repo').replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '').split('/');
         if (!owner || !repo) return toast('Enter the repo as owner/name.', true);
-        store.configure({ owner, repo, branch: val('gh-branch') || 'main', token: val('gh-token') });
-        const msg = $('#gh-msg');
-        msg.textContent = 'Checking…';
+        store.git.configure({ owner, repo, branch: val('gh-branch') || 'main', token: val('gh-token') });
+        store.setMode('git');
+        say('Checking…');
         try {
-          const info = await store.verify();
+          const info = await store.git.verify();
           await store.sync();
-          msg.textContent = store.status.state === 'error' ? store.status.message
-            : !store.gh.token ? 'Connected read-only. Add a token to save changes.'
-            : info.canPush ? `Connected to ${owner}/${repo}. Changes will be committed to ${store.gh.branch}.`
+          storageMsg = store.status.state === 'error' ? store.status.message
+            : !store.git.config.token ? 'Connected read-only. Add a token to save changes.'
+            : info.canPush ? `Connected to ${owner}/${repo}. Changes are committed to ${store.git.config.branch}.`
             : 'Connected, but this token cannot write to the repo. Give it Contents: Read and write.';
-        } catch (e) { msg.textContent = e.message; }
+        } catch (e) { storageMsg = e.message; }
+        drawStorage();
       },
       disconnect() {
-        store.configure({ owner: '', repo: '', token: '' });
+        store.git.configure({ owner: '', repo: '', token: '' });
+        store.detach();
+        storageMsg = 'Disconnected. Your recipes are still on this device.';
+        drawStorage();
+      },
+      async 'sb-signup'() { await signIn(true); },
+      'sb-oauth'(btn) {
+        if (!projectReady()) return;
+        store.setMode('supabase');
+        store.account.oauth(btn.dataset.v);
+      },
+      async 'sb-recover'() {
+        if (!projectReady()) return;
+        if (!val('sb-email')) return say('Enter your email address first, then press Forgot password.');
+        try { await store.account.recover(val('sb-email')); say('If that address has an account, a reset link is on its way. Open it on this device.'); } catch (e) { say(e.message); }
+      },
+      async 'sb-signout'(btn) {
+        if (store.dirtyCount) {
+          try { await store.push(); } catch { if (!confirmTap(btn, 'Unsaved changes. Tap again to sign out anyway')) return; }
+        }
+        await store.account.signOut();
+        store.wipe();
+        storageNote = 'Signed out. Your recipes are in your account, no longer on this device.';
         settingsView();
       },
+      'sb-sync': () => store.sync(),
+    },
+    submit(form) {
+      if (form.id === 'sb-form') signIn(false);
+      if (form.id === 'sb-newpass') newPassword();
     },
   };
+  // Storage card: where the data lives, with the connection or sign-in form for the chosen option.
+  let storageMsg = storageNote || (store.status.state === 'error' ? store.status.message : '');
+  storageNote = '';
+  const say = m => { storageMsg = m; const el = $('#storage-msg'); if (el) el.textContent = m; };
+  const projectReady = () => {
+    if (!store.account.builtIn) store.account.configure({ url: val('sb-url'), key: val('sb-key') });
+    if (!store.account.configured) { say('Enter the Supabase project URL and public key first.'); return false; }
+    return true;
+  };
+  async function signIn(create) {
+    if (!projectReady()) return;
+    const email = val('sb-email'), password = $('#sb-password')?.value || '';
+    if (!email || !password) return say('Enter your email address and a password.');
+    say(create ? 'Creating your account…' : 'Signing in…');
+    try {
+      if (create && await store.account.signUp(email, password) === 'confirm') {
+        return say('Check your email for a confirmation link, then come back here and sign in.');
+      }
+      if (!create) await store.account.signIn(email, password);
+      store.setMode('supabase');
+      await store.sync();
+      storageNote = store.status.state === 'error' ? store.status.message : 'Signed in. Changes now save to your account automatically.';
+      settingsView();
+    } catch (e) { say(/invalid login/i.test(e.message) ? 'That email and password do not match an account.' : e.message); }
+  }
+  async function newPassword() {
+    const pw = $('#sb-new')?.value || '';
+    if (pw.length < 8) return say('Use at least 8 characters.');
+    try { await store.account.setPassword(pw); storageMsg = 'Password changed.'; drawStorage(); } catch (e) { say(e.message); }
+  }
+  function drawStorage() {
+    const el = $('#storage');
+    if (!el) return;
+    const g = store.git.config, acct = store.account, mode = store.mode;
+    const seg = (v, t) => `<button type="button" class="seg${mode === v ? ' on' : ''}" data-act="mode" data-v="${v}" aria-pressed="${mode === v}">${t}</button>`;
+    const body = mode === 'git' ? `
+      <p class="hint">Recipes are saved as BeerJSON files in <code>recipes/</code>, brew logs in <code>brews/</code>. Every save is a commit, so git keeps the full history.</p>
+      <div class="row">
+        <label class="fld w-name" for="gh-repo"><span>Repo, as owner/name</span><input id="gh-repo" value="${esc(g.owner && g.repo ? `${g.owner}/${g.repo}` : '')}" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+        <label class="fld" for="gh-branch"><span>Branch</span><input id="gh-branch" value="${esc(g.branch)}" autocapitalize="off" spellcheck="false"></label>
+      </div>
+      <div class="row"><label class="fld w-name" for="gh-token"><span>Personal access token</span><input id="gh-token" type="password" value="${esc(g.token)}" autocomplete="off"></label></div>
+      <p class="hint">Create a fine-grained token at GitHub → Settings → Developer settings, limited to this one repo, with <b>Contents: Read and write</b>. It is stored only in this browser.</p>
+      <div class="foot-actions"><button type="button" class="btn primary" data-act="connect">Connect and sync</button>${store.git.ready ? '<button type="button" class="btn" data-act="disconnect">Disconnect</button>' : ''}</div>`
+      : mode === 'supabase' ? `
+      <p class="hint">Sign in and your recipes, brew logs and settings are kept in your account and saved as you go. Use the same sign-in on your phone and computer.</p>
+      ${acct.builtIn ? '' : `<div class="row">
+        <label class="fld w-name" for="sb-url"><span>Supabase project URL</span><input id="sb-url" value="${esc(acct.url)}" placeholder="https://xxxx.supabase.co" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+        <label class="fld w-name" for="sb-key"><span>Public (publishable or anon) key</span><input id="sb-key" value="${esc(acct.key)}" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+      </div>`}
+      ${acct.recovering ? `<form id="sb-newpass" novalidate><div class="row">
+          <label class="fld w-name" for="sb-new"><span>Choose a new password</span><input id="sb-new" type="password" autocomplete="new-password"></label>
+          <button type="submit" class="btn primary">Set password</button></div></form>`
+        : acct.user ? `<div class="summary"><span>Signed in as <b>${esc(acct.user.email || 'your account')}</b></span></div>
+        <div class="foot-actions"><button type="button" class="btn" data-act="sb-sync">Sync now</button><button type="button" class="btn" data-act="sb-signout">Sign out</button></div>`
+        : `<form id="sb-form" novalidate><div class="row">
+          <label class="fld w-name" for="sb-email"><span>Email</span><input id="sb-email" type="email" autocomplete="username" autocapitalize="off" spellcheck="false"></label>
+          <label class="fld w-name" for="sb-password"><span>Password</span><input id="sb-password" type="password" autocomplete="current-password"></label>
+        </div>
+        <div class="foot-actions"><button type="submit" class="btn primary">Sign in</button><button type="button" class="btn" data-act="sb-signup">Create account</button>
+          <button type="button" class="btn ghost" data-act="sb-recover">Forgot password</button></div></form>
+        <div class="foot-actions alt"><button type="button" class="btn small" data-act="sb-oauth" data-v="github">Continue with GitHub</button><button type="button" class="btn small" data-act="sb-oauth" data-v="google">Continue with Google</button></div>
+        <p class="hint">Signing in copies any recipes already on this device into your account.</p>`}`
+      : '<p class="hint">Nothing leaves this browser. Clearing its site data would delete everything, so export the recipes you care about, or choose one of the other options to keep a proper copy.</p>';
+    el.innerHTML = `<div class="segs" role="group" aria-label="Where to keep your data">${seg('local', 'This device')}${seg('supabase', 'Gyle account')}${seg('git', 'GitHub repo')}</div>
+      ${body}<p class="hint" id="storage-msg" role="status">${esc(storageMsg)}</p>`;
+  }
   view.innerHTML = `
     <div class="page-head"><h1>Settings</h1></div>
     <section class="card"><div class="sec-head"><h2>Equipment profiles</h2><button type="button" class="btn small primary" id="save-btn" data-act="save"></button></div>
@@ -1367,19 +1471,13 @@ function settingsView() {
       <div id="waters"></div>
       <div class="foot-actions"><button type="button" class="btn" data-act="add-water">Add water profile</button></div>
     </section>
-    <section class="card"><div class="sec-head"><h2>GitHub repo</h2></div>
-      <p class="hint">Recipes are saved as BeerJSON files in <code>recipes/</code>, brew logs in <code>brews/</code>. Every save is a commit, so git keeps the full history of each recipe.</p>
-      <div class="row">
-        <label class="fld w-name" for="gh-repo"><span>Repo, as owner/name</span><input id="gh-repo" value="${esc(g.owner && g.repo ? `${g.owner}/${g.repo}` : '')}" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
-        <label class="fld" for="gh-branch"><span>Branch</span><input id="gh-branch" value="${esc(g.branch)}" autocapitalize="off" spellcheck="false"></label>
-      </div>
-      <div class="row"><label class="fld w-name" for="gh-token"><span>Personal access token</span><input id="gh-token" type="password" value="${esc(g.token)}" autocomplete="off"></label></div>
-      <p class="hint">Create a fine-grained token at GitHub → Settings → Developer settings, limited to this one repo, with <b>Contents: Read and write</b>. It is stored only in this browser.</p>
-      <div class="foot-actions"><button type="button" class="btn primary" data-act="connect">Connect and sync</button>${store.connected ? '<button type="button" class="btn" data-act="disconnect">Disconnect</button>' : ''}</div>
-      <p class="hint" id="gh-msg" role="status">${store.status.state === 'error' ? esc(store.status.message) : ''}</p>
+    <section class="card"><div class="sec-head"><h2>Storage</h2></div>
+      <p class="hint">Where your recipes, brew logs and settings are kept. Whichever you choose, this browser keeps a working copy so Gyle still works offline.</p>
+      <div id="storage"></div>
     </section>`;
   drawProfiles();
   drawWaters();
+  drawStorage();
 }
 
 // ---------- shell ----------
@@ -1392,32 +1490,32 @@ const ROUTES = { recipes: recipesView, recipe: recipeView, brews: brewsView, bre
 const TAB_OF = { recipe: 'recipes', brew: 'brews', tool: 'tools' };
 let routeKey = '';
 
-function route() {
+function route(keepScroll = false) {
   const [name, ...rest] = location.hash.replace(/^#/, '').split('/');
   const key = ROUTES[name] ? name : 'recipes';
   routeKey = key + '/' + rest.join('/');
   document.querySelectorAll('#tabs a').forEach(a => a.toggleAttribute('aria-current', a.dataset.tab === (TAB_OF[key] || key)));
   ROUTES[key](rest.join('/'));
-  window.scrollTo(0, 0);
+  if (keepScroll !== true) window.scrollTo(0, 0);
 }
 
 function drawChip() {
   const chip = $('#sync-chip'), { state } = store.status, dirty = store.dirtyCount;
   const [cls, text] = state === 'syncing' ? ['busy', 'Syncing…']
     : !store.connected ? ['off', 'This device only']
-    : dirty ? ['dirty', `${dirty} to commit`]
+    : dirty ? ['dirty', store.words.pending(dirty)]
     : state === 'error' ? ['bad', 'Sync problem']
     : ['ok', 'In sync'];
   chip.className = 'sync ' + cls;
   chip.textContent = text;
-  chip.title = state === 'error' ? store.status.message : 'Sync with the repo';
+  chip.title = state === 'error' ? store.status.message : store.connected ? 'Sync now' : 'Choose where to keep your recipes';
 }
 
 $('#sync-chip').addEventListener('click', async () => {
   if (!store.connected) { location.hash = '#settings'; return; }
   if (store.dirtyCount) {
-    if (!store.canWrite) { toast('Add a token in Settings to commit changes.', true); location.hash = '#settings'; return; }
-    try { await store.push(); toast('All changes committed.'); } catch (e) { toast(e.message, true); }
+    if (!store.canWrite) { toast(store.words.need, true); location.hash = '#settings'; return; }
+    try { await store.push(); toast(store.words.all); } catch (e) { toast(e.message, true); }
   } else {
     await store.sync();
     if (store.status.state === 'error') toast(store.status.message, true);
@@ -1450,17 +1548,23 @@ store.on(() => {
   drawChip();
   const synced = store.status.state === 'synced';
   // After a pull, list pages redraw; open editors only refresh their save button so typing is never interrupted.
-  if (synced && !lastSynced && /^(recipes|brews)\/$/.test(routeKey)) route();
-  else if (synced && !lastSynced && view.querySelector('.empty-state') && /^(recipe|brew)\//.test(routeKey)) route();
-  else if (ctx.ref && ctx.ref() !== ctx.doc) route(); // the repo had a newer copy of the open document
+  if (synced && !lastSynced && /^(recipes|brews)\/$/.test(routeKey)) route(true);
+  else if (synced && !lastSynced && view.querySelector('.empty-state') && /^(recipe|brew)\//.test(routeKey)) route(true);
+  else if (ctx.ref && ctx.ref() !== ctx.doc) route(true); // storage had a newer copy of the open document
   else ctx.refresh?.();
   lastSynced = synced;
 });
-window.addEventListener('hashchange', route);
+window.addEventListener('hashchange', () => route());
 window.addEventListener('beforeunload', () => store.persist());
+// Arriving from a sign-in link (email confirmation, password reset, GitHub or Google)?
+const arrived = await store.account.takeRedirect();
+if (arrived?.ok) store.setMode('supabase');
 drawChip();
 drawTimerChip();
 route();
+if (arrived?.error) toast(`Sign-in did not complete: ${arrived.error}`, true);
+else if (arrived?.recovering) toast('Choose a new password in Settings.');
+else if (arrived?.ok) toast('Signed in.');
 store.sync();
 
 // First run without a repo (a local test, say): load the example recipe that ships in recipes/.

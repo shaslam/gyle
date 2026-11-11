@@ -1,3 +1,9 @@
+/* Fonts are served from this site (fonts/), not from Google. Latin subsets, SIL Open Font License. */
+@font-face { font-family: "Alfa Slab One"; font-style: normal; font-weight: 400; font-display: swap; src: url(../fonts/alfa-slab-one.woff2) format("woff2"); }
+@font-face { font-family: "Archivo"; font-style: normal; font-weight: 400 800; font-stretch: 75% 100%; font-display: swap; src: url(../fonts/archivo.woff2) format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url(../fonts/ibm-plex-mono-400.woff2) format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url(../fonts/ibm-plex-mono-500.woff2) format("woff2"); }
+
 :root {
   /* Layout: beer mats on kraft board. Tan wall, cream beer-mat panels with a printed keyline,
      wood-type slab headings, amber for the one thing to press. Bottle green is kept for
@@ -421,3 +427,10 @@ svg.radar.malt .ring { stroke: rgb(74 52 14 / .35); stroke-width: 5; }
 #sec-device .summary { border-top: 0; padding-top: 0; }
 .summary .stable { color: var(--ok); font-weight: 700; }
 #sec-device .foot-actions { margin-top: 12px; }
+
+/* ---- storage and sign-in ---- */
+#storage .segs { margin-bottom: 4px; }
+#storage form { margin-top: 12px; }
+#storage .foot-actions { margin-top: 12px; }
+#storage .foot-actions.alt { padding-top: 12px; border-top: 1.5px dashed var(--line); }
+#storage .summary { border-top: 0; padding-top: 0; }

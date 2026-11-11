@@ -1,0 +1,32 @@
+# Keeps a free-plan Supabase project from being paused for inactivity by making one small
+# database write every three days. Not needed on a paid plan.
+#
+# Set two repository secrets (Settings -> Secrets and variables -> Actions):
+#   SUPABASE_URL   e.g. https://abcdefghijkl.supabase.co
+#   SUPABASE_KEY   the project's publishable (or legacy anon) key
+#
+# GitHub disables scheduled workflows in a repo with no activity for about two months, and
+# scheduled runs can be late. If Supabase emails a pause warning, check this workflow's runs.
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: "23 5 */3 * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write a heartbeat
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST "$SUPABASE_URL/rest/v1/rpc/gyle_heartbeat" \
+            --header "apikey: $SUPABASE_KEY" \
+            --header "Content-Type: application/json" \
+            --data '{}'

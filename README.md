@@ -23,7 +23,43 @@ To run it locally instead: `python3 -m http.server` in this folder, then open
 `http://localhost:8000`. It must be served over http; opening `index.html` as a
 file does not work because the code uses JavaScript modules.
 
-## How saving works
+## Where your data lives
+
+Settings → Storage offers three choices. In all of them the browser keeps a working copy,
+so the app works offline and nothing is lost mid-brew.
+
+- **This device**: the browser only.
+- **GitHub repo**: BeerJSON files in a repo, one commit per save (the steps above). The app
+  code and the data can be different repos: host the app from a public repo and point
+  Settings at a private one.
+- **Gyle account**: a Supabase project with sign-in. Changes save by themselves a moment
+  after you stop typing.
+
+Switching from one to another copies what is on the device into the new place. Signing out
+of a Gyle account clears the device copy.
+
+### Setting up a Gyle account (Supabase)
+
+1. Create a project at supabase.com.
+2. In the project's **SQL Editor**, paste and run `supabase/setup.sql`. It creates one
+   `documents` table with row-level security, so each person sees only their own rows.
+3. Under **Authentication → URL Configuration**, set the Site URL to the address the app is
+   served from (for example `https://<you>.github.io/<repo>/`). Sign-in links and
+   GitHub/Google sign-in return there.
+4. Optional: under **Authentication → Providers**, switch on GitHub or Google to use the
+   "Continue with" buttons. Email and password works without this.
+5. Copy the project's URL and its publishable (or legacy "anon") key into `js/config.js`,
+   or leave that file empty and type them into Settings on each device. Both are public
+   values. Never use the secret or service-role key.
+6. Open Gyle → Settings → Storage → Gyle account, and create your account.
+
+On Supabase's free plan a project is paused after about a week without database activity.
+`.github/workflows/supabase-keepalive.yml` writes a heartbeat every three days: add the
+repository secrets `SUPABASE_URL` and `SUPABASE_KEY` to switch it on. If the project does
+get paused, restore it from the Supabase dashboard; Gyle keeps working from the device copy
+in the meantime.
+
+## How saving works (GitHub repo)
 
 - Edits are written to the browser straight away, so nothing is lost mid-brew.
 - **Commit to repo** on a recipe or brew writes that one file as a commit.
@@ -41,7 +77,11 @@ js/calc.js          all the brewing maths
 js/data.js          styles, malts, hops and yeasts offered in the editor
 js/beerjson.js      BeerJSON <-> the app's model
 js/beerxml.js       BeerXML import and export
-js/store.js         local working copy + GitHub API
+js/store.js         local working copy and syncing
+js/backend-git.js   storage backend: GitHub repo
+js/backend-supabase.js  storage backend: Supabase account (sign-in + documents table)
+js/config.js        Supabase project URL and public key
+supabase/setup.sql  database setup for the Supabase backend
 js/timer.js         brew-day timer, alerts and notifications
 js/sources.js       reading sources for automatic gravity readings (ThingSpeak)
 js/app.js           the screens

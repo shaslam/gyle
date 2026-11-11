@@ -1,51 +1,52 @@
 // Storage. Every document lives in two places:
-//   1. a working copy in this browser (localStorage), so edits are never lost mid-brew;
-//   2. a file in the GitHub repo, written through the GitHub contents API. Each save is a commit.
-// Layout in the repo:  recipes/<id>.json (BeerJSON)   brews/<id>.json   settings.json
+//   1. a working copy in this browser, so edits are never lost mid-brew and the app works offline;
+//   2. a backend that keeps the real copy: a GitHub repo (each save is a commit) or a Gyle
+//      account (a hosted database with sign-in, saved automatically).
+// The store handles the working copy and the syncing; the backends only know how to list, read,
+// write and remove documents. Recipes travel as BeerJSON whichever backend holds them.
 
 import { toBeerJSON, fromBeerJSON } from './beerjson.js';
+import { GitBackend } from './backend-git.js';
+import { SupabaseBackend } from './backend-supabase.js';
 
 const LS_CACHE = 'gyle.cache.v1';
-const LS_GH = 'gyle.github.v1';
+const LS_MODE = 'gyle.storage.v1';
 const KINDS = ['recipes', 'brews', 'settings'];
-const API = 'https://api.github.com';
 
-const pathOf = (kind, id) => (kind === 'settings' ? 'settings.json' : `${kind}/${id}.json`);
-const serialize = (kind, data) => JSON.stringify(kind === 'recipes' ? toBeerJSON(data) : data, null, 2) + '\n';
-const parse = (kind, text) => (kind === 'recipes' ? fromBeerJSON(JSON.parse(text))[0] : JSON.parse(text));
-const b64 = s => {
-  let bin = '';
-  new TextEncoder().encode(s).forEach(b => { bin += String.fromCharCode(b); });
-  return btoa(bin);
-};
+const encode = (kind, data) => (kind === 'recipes' ? toBeerJSON(data) : data);
+const decode = (kind, payload) => (kind === 'recipes' ? fromBeerJSON(payload)[0] : payload);
 const ls = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage full or blocked */ } },
 };
-
-function detectRepo() {
-  const m = /^([\w-]+)\.github\.io$/.exec(location.hostname);
-  const repo = location.pathname.split('/').filter(Boolean)[0];
-  return m && repo && !repo.includes('.') ? { owner: m[1], repo } : {};
-}
+const LOCAL_WORDS = { save: 'Saved on this device', saved: 'Saved on this device', pending: () => 'This device only', unsaved: 'on this device only', need: 'Choose where to keep your recipes in Settings.' };
 
 class Store {
-  docs = { recipes: {}, brews: {}, settings: {} };  // id -> { data, sha, dirty, deleted }
-  gh = { owner: '', repo: '', branch: 'main', token: '' };
+  docs = { recipes: {}, brews: {}, settings: {} };  // id -> { data, sha (the backend's version), dirty, deleted }
+  git = new GitBackend();
+  account = new SupabaseBackend();
+  mode = 'local';   // 'local' | 'git' | 'supabase'
+  owner = 'local';  // which backend the working copy was last in step with
   status = { state: 'local', message: '' };
   #listeners = new Set();
   #persistTimer = null;
+  #autoTimer = null;
   #busy = false;
 
   init() {
     const cached = ls.get(LS_CACHE);
     if (cached) for (const k of KINDS) this.docs[k] = cached[k] || {};
-    this.gh = { ...this.gh, ...detectRepo(), ...(ls.get(LS_GH) || {}) };
+    const saved = ls.get(LS_MODE);
+    if (saved) { this.mode = saved.mode || 'local'; this.owner = saved.owner || 'local'; }
+    else if (this.git.ready) { this.mode = 'git'; this.owner = this.git.id; } // connections made before storage choices existed
     this.status.state = this.connected ? 'idle' : 'local';
   }
 
-  get connected() { return !!(this.gh.owner && this.gh.repo); }
-  get canWrite() { return this.connected && !!this.gh.token; }
+  get backend() { return this.mode === 'git' ? this.git : this.mode === 'supabase' ? this.account : null; }
+  get connected() { return !!this.backend?.ready; }
+  get canWrite() { return !!this.backend?.canWrite; }
+  get auto() { return !!this.backend?.auto; }
+  get words() { return this.connected ? this.backend.words : LOCAL_WORDS; }
   get dirtyCount() {
     return KINDS.reduce((n, k) => n + Object.values(this.docs[k]).filter(d => d.dirty).length, 0);
   }
@@ -54,6 +55,41 @@ class Store {
   #emit() { this.#listeners.forEach(fn => fn()); }
   #setStatus(state, message = '') { this.status = { state, message }; this.#emit(); }
   persist() { ls.set(LS_CACHE, this.docs); }
+  #saveMode() { ls.set(LS_MODE, { mode: this.mode, owner: this.owner }); }
+
+  // ---- choosing where data lives ----
+  setMode(mode) {
+    this.mode = mode;
+    this.#saveMode();
+    this.#setStatus(this.connected ? 'idle' : 'local');
+  }
+  // Call after connecting a repo or signing in. If the working copy belonged somewhere else (this
+  // device only, another repo, the other kind of backend), everything in it is queued to be saved
+  // to the new place, so moving between backends carries your recipes with you.
+  adopt() {
+    if (!this.connected || this.owner === this.backend.id) return;
+    for (const k of KINDS) {
+      for (const [id, d] of Object.entries(this.docs[k])) {
+        if (d.deleted) delete this.docs[k][id]; else { d.sha = undefined; d.dirty = true; }
+      }
+    }
+    this.owner = this.backend.id;
+    this.persist(); this.#saveMode();
+    this.#setStatus('idle');
+  }
+  // Forget the working copy (after signing out, so the next person to sign in here starts clean).
+  wipe() {
+    this.docs = { recipes: {}, brews: {}, settings: {} };
+    this.owner = 'local';
+    this.persist(); this.#saveMode();
+    this.#setStatus(this.connected ? 'idle' : 'local');
+  }
+  // Keep the working copy but stop syncing it anywhere.
+  detach() {
+    this.owner = 'local';
+    this.#saveMode();
+    this.#setStatus(this.connected ? 'idle' : 'local');
+  }
 
   // ---- working copy ----
   get(kind, id) { const d = this.docs[kind][id]; return d && !d.deleted ? d.data : undefined; }
@@ -66,6 +102,7 @@ class Store {
     this.docs[kind][id] = { data, sha: old?.sha, dirty: true };
     this.persist();
     this.#emit();
+    this.#autoSave();
   }
   // Mark an object you edited in place as changed. Writes to the browser after a short pause.
   touch(kind, id) {
@@ -76,6 +113,7 @@ class Store {
     clearTimeout(this.#persistTimer);
     this.#persistTimer = setTimeout(() => this.persist(), 400);
     if (!was) this.#emit();
+    this.#autoSave();
   }
   remove(kind, id) {
     const d = this.docs[kind][id];
@@ -83,101 +121,47 @@ class Store {
     if (d.sha) { d.deleted = true; d.dirty = true; } else delete this.docs[kind][id];
     this.persist();
     this.#emit();
+    this.#autoSave();
+  }
+  // Backends that save by themselves (a Gyle account) do so a moment after the last change.
+  #autoSave(delay = 2500) {
+    if (!this.auto || !this.canWrite) return;
+    clearTimeout(this.#autoTimer);
+    this.#autoTimer = setTimeout(() => {
+      if (!this.dirtyCount) return;
+      if (this.#busy) return this.#autoSave(1000);
+      this.push().catch(() => {}); // the status chip shows the error
+    }, delay);
   }
 
-  // ---- GitHub ----
-  configure(gh) {
-    this.gh = { ...this.gh, ...gh };
-    ls.set(LS_GH, this.gh);
-    this.#setStatus(this.connected ? 'idle' : 'local');
-  }
-
-  async #api(method, path, body, raw = false) {
-    const { owner, repo, branch, token } = this.gh;
-    const url = `${API}/repos/${owner}/${repo}${path}${method === 'GET' && path.startsWith('/contents') ? `?ref=${encodeURIComponent(branch)}` : ''}`;
-    let res;
-    try {
-      res = await fetch(url, {
-        method, cache: 'no-store',
-        headers: {
-          Accept: raw ? 'application/vnd.github.raw+json' : 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: body ? JSON.stringify(body) : undefined,
-      });
-    } catch {
-      throw Object.assign(new Error('Could not reach GitHub. Check your connection.'), { status: 0 });
-    }
-    if (!res.ok) {
-      const detail = await res.json().catch(() => ({}));
-      const msg = {
-        401: 'GitHub rejected the token. Create a new one in Settings.',
-        403: token ? `GitHub refused: ${detail.message || 'the token may lack Contents write access'}.` : 'GitHub rate limit reached. Add a token in Settings.',
-        404: 'Not found on GitHub.',
-      }[res.status] || `GitHub error ${res.status}: ${detail.message || res.statusText}`;
-      throw Object.assign(new Error(msg), { status: res.status });
-    }
-    return raw ? res.text() : res.json();
-  }
-
-  // Check the repo exists and report whether the token can write to it.
-  async verify() {
-    try {
-      const info = await this.#api('GET', '');
-      return { ok: true, canPush: !!info.permissions?.push, defaultBranch: info.default_branch, private: info.private };
-    } catch (e) {
-      if (e.status === 404) throw new Error(`Repo ${this.gh.owner}/${this.gh.repo} not found. If it is private, the token needs access to it.`);
-      throw e;
-    }
-  }
-
-  async #listDir(dir) {
-    try {
-      const items = await this.#api('GET', `/contents/${dir}`);
-      return Array.isArray(items) ? items.filter(f => f.type === 'file' && f.name.endsWith('.json')) : [];
-    } catch (e) {
-      if (e.status === 404) return [];
-      throw e;
-    }
-  }
-
-  // Pull anything that changed in the repo. Local uncommitted edits are kept.
+  // ---- syncing ----
+  // Pull anything that changed in the backend. Unsaved local edits are kept.
   async sync() {
     if (!this.connected || this.#busy) return;
+    this.adopt();
+    const backend = this.backend;
     this.#busy = true;
     this.#setStatus('syncing');
     try {
-      for (const kind of ['recipes', 'brews']) {
-        const remote = new Map((await this.#listDir(kind)).map(f => [f.name.slice(0, -5), f.sha]));
+      for (const kind of KINDS) {
+        const remote = await backend.list(kind);
         const docs = this.docs[kind];
-        for (const [id, sha] of remote) {
+        for (const [id, version] of remote) {
           const d = docs[id];
-          if (d?.dirty) { d.sha = sha; continue; }
-          if (d?.sha === sha) continue;
+          if (d?.dirty) { d.sha = version; continue; }
+          if (d?.sha === version) continue;
           try {
-            docs[id] = { data: parse(kind, await this.#api('GET', `/contents/${pathOf(kind, id)}`, null, true)), sha, dirty: false };
+            const got = await backend.read(kind, id);
+            docs[id] = { data: decode(kind, got.payload), sha: got.version, dirty: false };
           } catch (e) {
-            if (e.status !== undefined) throw e;
-            console.warn(`Skipped ${pathOf(kind, id)}: ${e.message}`);
+            if (e.status !== undefined && e.status !== 404) throw e;
+            console.warn(`Skipped ${kind}/${id}: ${e.message}`);
           }
         }
         for (const id of Object.keys(docs)) {
           if (remote.has(id)) continue;
-          if (!docs[id].dirty) delete docs[id];
-          else docs[id].sha = undefined;
+          if (!docs[id].dirty) delete docs[id]; else docs[id].sha = undefined;
         }
-      }
-      const s = this.docs.settings.settings;
-      try {
-        const meta = await this.#api('GET', '/contents/settings.json');
-        if (s?.dirty) s.sha = meta.sha;
-        else if (s?.sha !== meta.sha) {
-          const bytes = Uint8Array.from(atob(meta.content.replace(/\s/g, '')), c => c.charCodeAt(0));
-          this.docs.settings.settings = { data: JSON.parse(new TextDecoder().decode(bytes)), sha: meta.sha, dirty: false };
-        }
-      } catch (e) {
-        if (e.status !== 404) throw e;
       }
       this.persist();
       this.#setStatus('synced');
@@ -186,31 +170,7 @@ class Store {
     } finally {
       this.#busy = false;
     }
-  }
-
-  async #pushOne(kind, id, message) {
-    const d = this.docs[kind][id];
-    if (!d?.dirty) return;
-    const path = `/contents/${pathOf(kind, id)}`;
-    const { branch } = this.gh;
-    const attempt = async () => {
-      if (d.deleted) {
-        if (d.sha) await this.#api('DELETE', path, { message, sha: d.sha, branch });
-        delete this.docs[kind][id];
-      } else {
-        const res = await this.#api('PUT', path, { message, content: b64(serialize(kind, d.data)), branch, ...(d.sha ? { sha: d.sha } : {}) });
-        d.sha = res.content.sha;
-        d.dirty = false;
-      }
-    };
-    try {
-      await attempt();
-    } catch (e) {
-      // The file changed in the repo since we last looked: take its current sha and save over it.
-      if (e.status !== 409 && e.status !== 422) throw e;
-      try { d.sha = (await this.#api('GET', path)).sha; } catch (e2) { if (e2.status === 404) d.sha = undefined; else throw e2; }
-      await attempt();
-    }
+    if (this.dirtyCount) this.#autoSave(500);
   }
 
   #message(kind, id) {
@@ -219,16 +179,29 @@ class Store {
     return `${d.deleted ? 'Delete' : d.sha ? 'Update' : 'Add'} ${what}`;
   }
 
-  // Commit one document, or every uncommitted one when called with no arguments.
+  // Save one document, or every unsaved one when called with no arguments.
   async push(kind, id) {
-    if (!this.canWrite) throw new Error('Connect a repo and add a token in Settings to save to GitHub.');
+    if (!this.canWrite) throw new Error(this.words.need);
     if (this.#busy) throw new Error('Still syncing. Try again in a moment.');
+    const backend = this.backend;
     this.#busy = true;
     this.#setStatus('syncing');
     clearTimeout(this.#persistTimer);
     try {
       const targets = kind ? [[kind, id]] : KINDS.flatMap(k => Object.keys(this.docs[k]).filter(i => this.docs[k][i].dirty).map(i => [k, i]));
-      for (const [k, i] of targets) await this.#pushOne(k, i, this.#message(k, i));
+      for (const [k, i] of targets) {
+        const d = this.docs[k][i];
+        if (!d?.dirty) continue;
+        const message = this.#message(k, i);
+        if (d.deleted) {
+          await backend.remove(k, i, d.sha, message);
+          delete this.docs[k][i];
+        } else {
+          const sent = JSON.stringify(d.data);
+          d.sha = await backend.write(k, i, encode(k, d.data), d.sha, message);
+          d.dirty = JSON.stringify(d.data) !== sent; // still unsaved if it was edited while the save was in flight
+        }
+      }
       this.persist();
       this.#setStatus('synced');
     } catch (e) {
@@ -237,17 +210,18 @@ class Store {
       throw e;
     } finally {
       this.#busy = false;
+      if (this.dirtyCount) this.#autoSave();
     }
   }
 
-  // Throw away local edits to one document and take the repo's version.
+  // Throw away local edits to one document and take the backend's version.
   async revert(kind, id) {
     const d = this.docs[kind][id];
     if (!d) return;
-    if (!d.sha) { delete this.docs[kind][id]; } else {
-      const text = await this.#api('GET', `/contents/${pathOf(kind, id)}`, null, true);
-      const meta = await this.#api('GET', `/contents/${pathOf(kind, id)}`);
-      this.docs[kind][id] = { data: parse(kind, text), sha: meta.sha, dirty: false };
+    if (!d.sha) delete this.docs[kind][id];
+    else {
+      const got = await this.backend.read(kind, id);
+      this.docs[kind][id] = { data: decode(kind, got.payload), sha: got.version, dirty: false };
     }
     this.persist();
     this.#emit();
