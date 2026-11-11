@@ -83,7 +83,7 @@ with sync_playwright() as p:
     pg.goto(U+'#recipe/house-pale-ale'); pg.wait_for_timeout(1300); print('3 editor save btn:', pg.inner_text('#save-btn'))
     pg.fill('#f-name','House Pale Ale v2'); pg.wait_for_timeout(300); print('  typing:', pg.inner_text('#save-btn'), chip())
     pg.wait_for_timeout(3200); print('  later:', pg.inner_text('#save-btn'), chip(), '| stored name:', rows[('u1','recipes','house-pale-ale')]['data']['beerjson']['recipes'][0]['name'], '| focus kept:', pg.evaluate('document.activeElement.id'))
-    pg.goto(U+'#recipes'); pg.wait_for_timeout(400); pg.click('[data-act=new]'); pg.wait_for_timeout(300); pg.fill('#f-name','Second'); pg.wait_for_timeout(3300)
+    pg.goto(U+'#recipes'); pg.wait_for_timeout(400); pg.click('[data-act=new]'); pg.fill('#nr-name','Second'); pg.click('dialog.sheet button[type=submit]'); pg.wait_for_timeout(3300)
     rid=[k[2] for k in rows if k[1]=='recipes' and k[2]!='house-pale-ale'][0]
     pg.click('[data-act=delete]'); pg.click('[data-act=delete]'); pg.wait_for_timeout(3300); print('4 delete synced:', ('u1','recipes',rid) not in rows, names())
     pg.goto(U+'#settings'); pg.wait_for_timeout(300); pg.click('[data-act=sb-signout]'); pg.wait_for_timeout(600)

@@ -84,13 +84,17 @@ js/config.js        Supabase project URL and public key
 supabase/setup.sql  database setup for the Supabase backend
 js/timer.js         brew-day timer, alerts and notifications
 js/sources.js       reading sources for automatic gravity readings (ThingSpeak)
+js/brewsheet.js     the brew sheet, as a web page and as a PDF
+js/pdf.js           a small PDF writer for the brew sheet
+fonts/              the web fonts, served from this site
 js/app.js           the screens
 sw.js               service worker, only so Android can show timer notifications
 ```
 
 A few things BeerJSON has no field for are stored under `x_` keys in the recipe
 files: first-wort / whirlpool hop use (`x_use`), whirlpool temperature (`x_temp`),
-mash ratio (`x_mash_ratio`) and the equipment profile id (`x_equipment`). Other software ignores them.
+mash ratio (`x_mash_ratio`), the equipment profile id (`x_equipment`), and the version
+fields (`x_family`, `x_version`, `x_version_note`, `x_based_on`). Other software ignores them.
 
 ## Brew queue
 
@@ -102,6 +106,34 @@ switches the list to recently edited or by name.
 Each recipe is flagged **In planning** or **Ready to brew** (the toggle under its name;
 `x_status` in the file). The first ready recipe in the queue is tagged as the next brew,
 and the Show menu filters the list by status.
+
+## Versions and new recipes
+
+To change a recipe and keep its name, press **New version** on the recipe. The new version
+starts as a copy and gets the next number. The old version stays as it was, so brews made
+from it still show what you brewed. You can say what will change, and the note shows under
+**Packaging & notes**.
+
+The recipe list and the brew picker show only the newest version of each recipe. The
+links under the recipe name (v1, v2, v3) open the other versions. An older version says
+so at the top. If you delete the newest version, the one before it takes its place in
+the brew queue.
+
+To start a different beer from an existing one, press **New recipe from this**, or
+**New recipe** on the recipe list and choose a recipe under "Start from". The new recipe
+must have a name of its own. It starts as a copy at version 1 and links back to the
+recipe it was based on.
+
+## Brew sheets
+
+**Brew sheet** on a recipe or a brew log opens a sheet for brew day: the targets,
+every ingredient, the water, the brew-day checklist with tick boxes, a plan-and-actual
+table and space for notes. A recipe's sheet has blanks to fill in by hand. A brew log's
+sheet fills in what you measured and ticked.
+
+**Print** uses the browser's print dialog, which can also save a PDF. **Download PDF**
+makes an A4 PDF file in the app itself. The PDF uses the standard Helvetica font, so
+characters outside Western European text show as "?".
 
 ## Equipment profiles
 

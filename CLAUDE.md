@@ -23,7 +23,7 @@ Always run `node tests/calc.test.mjs` after touching `js/calc.js`, `js/data.js` 
 
 - Plain ES modules, hand-written HTML strings, one stylesheet. Do not add a framework, bundler or npm dependency without asking.
 - Everything is metric internally and in the UI: litres, kg, g, °C, EBC (SRM is shown alongside in places).
-- Recipes are stored as BeerJSON 1.0. App-only fields go under `x_` keys (`x_use`, `x_temp`, `x_mash_ratio`, `x_equipment`, `x_status`, `x_water`). Keep the round trip in the tests passing.
+- Recipes are stored as BeerJSON 1.0. App-only fields go under `x_` keys (`x_use`, `x_temp`, `x_mash_ratio`, `x_equipment`, `x_status`, `x_water`, and for versions `x_family`, `x_version`, `x_version_note`, `x_based_on`). Keep the round trip in the tests passing.
 - The app must stay usable on a phone at about 390 px wide with no sideways scroll.
 - No `alert`/`confirm`/`prompt`: destructive buttons use the two-tap `confirmTap` helper.
 - UK spelling in UI text ("colour"). Plain, short labels.
@@ -43,6 +43,8 @@ Always run `node tests/calc.test.mjs` after touching `js/calc.js`, `js/data.js` 
 | `js/backend-git.js` | Storage backend: GitHub contents API, one commit per save |
 | `js/backend-supabase.js` | Storage backend: Supabase Auth + a `documents` table over plain `fetch` (no SDK) |
 | `js/config.js` | Supabase project URL and public key (currently empty: typed into Settings instead) |
+| `js/brewsheet.js` | Brew sheet: `sheetHtml(model)` and `sheetPdf(model)` draw the same description. `sheetModel()` in `app.js` builds it |
+| `js/pdf.js` | Minimal PDF writer: A4 pages, Helvetica and Helvetica-Bold (not embedded, WinAnsi only), text, lines, boxes, shapes |
 | `js/timer.js` | Brew-day timer, alerts, notifications, wake lock |
 | `js/sources.js` | Reading sources for automatic gravity readings (ThingSpeak, for an iSpindel) |
 | `fonts/` | Self-hosted Alfa Slab One, Archivo (variable width and weight) and IBM Plex Mono, Latin subsets, with their OFL licence texts. `@font-face` rules are at the top of `css/app.css` |
@@ -58,6 +60,14 @@ implements `id`, `ready`, `canWrite`, `auto`, `words`, `list(kind)`, `read(kind,
 `write(...)`, `remove(...)`. Git saves on an explicit commit; Supabase auto-saves about 2.5 s
 after the last edit. `store.adopt()` re-queues the whole working copy when the backend
 changes (this is how data migrates between backends); `store.wipe()` runs on sign-out.
+
+### Recipe versions
+
+Each version is its own recipe document. Versions share `family` (the id of version 1) and
+count up in `version`. Old recipes without these fields are version 1 of a family named after
+their own id (`familyOf()`, `versionOf()` in `app.js`). Lists show only the newest version per
+family (`latestOnly()`), and the brew queue keeps the newest version's id (`swapInQueue()`).
+A recipe started from another one gets a new family and `basedOn: { id, name, version }`.
 
 ### Settings document
 

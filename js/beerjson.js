@@ -3,7 +3,10 @@
 // Three things BeerJSON has no field for are kept under x_ keys: a hop's
 // first-wort / whirlpool use (x_use), whirlpool temperature (x_temp) and the
 // mash water-to-grain ratio (x_mash_ratio). x_equipment is the id of the
-// equipment profile the recipe was designed on, and x_status is 'planning' or 'ready'. Other software ignores them.
+// equipment profile the recipe was designed on, and x_status is 'planning' or 'ready'.
+// Versions: x_family is shared by every version of a recipe (the id of the first one), x_version
+// counts from 1, x_version_note says what changed, and x_based_on names the recipe a new
+// recipe was started from ({ id, name, version }). Other software ignores all of them.
 
 import { lovibondToSrm, srmToEbc, platoToSg, yieldToPotential, findStyleSafe } from './units.js';
 
@@ -90,6 +93,10 @@ export function toBeerJSON(r) {
     ...(r.equipment ? { x_equipment: r.equipment } : {}),
     x_status: r.status === 'ready' ? 'ready' : 'planning',
     ...(r.water ? { x_water: r.water } : {}),
+    ...(r.family ? { x_family: r.family } : {}),
+    ...(r.version > 1 ? { x_version: r.version } : {}),
+    ...(r.versionNote ? { x_version_note: r.versionNote } : {}),
+    ...(r.basedOn ? { x_based_on: r.basedOn } : {}),
   };
   return { beerjson: { version: 1.0, recipes: [recipe] } };
 }
@@ -165,6 +172,10 @@ export function recipeFromJSON(j) {
     ...(j.x_equipment ? { equipment: j.x_equipment } : {}),
     status: j.x_status === 'ready' ? 'ready' : 'planning',
     ...(j.x_water ? { water: j.x_water } : {}),
+    ...(j.x_family ? { family: String(j.x_family) } : {}),
+    ...(j.x_version > 1 ? { version: Math.round(+j.x_version) } : {}),
+    ...(j.x_version_note ? { versionNote: String(j.x_version_note) } : {}),
+    ...(j.x_based_on?.name ? { basedOn: j.x_based_on } : {}),
     fermentables: (ing.fermentable_additions || []).map(f => ({
       name: f.name || '', type: f.type || 'grain', amount: round(kilos(f.amount) ?? 0),
       potential: potential(f.yield), color: round(ebc(f.color), 1),

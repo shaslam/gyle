@@ -4,6 +4,8 @@ import * as C from '../js/calc.js';
 import { toBeerJSON, fromBeerJSON, blankRecipe } from '../js/beerjson.js';
 import { toBeerXML } from '../js/beerxml.js';
 import { grainDiPh } from '../js/data.js';
+import { sheetPdf } from '../js/brewsheet.js';
+import { toWinAnsi } from '../js/pdf.js';
 
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg}: got ${a}, expected ${b} ±${tol}`);
 
@@ -21,6 +23,8 @@ const recipe = {
     { name: 'Citra', amount: 40, alpha: 12.5, form: 'pellet', use: 'dry hop', time: 4 },
   ],
   yeasts: [{ name: 'SafAle US-05', lab: 'Fermentis', form: 'dry', attenuation: 81, amount: 1 }],
+  family: 'house-pale-ale', version: 2, versionNote: 'More Citra',
+  basedOn: { id: 'best-bitter-x1', name: 'Best Bitter', version: 3 },
 };
 
 const s = C.recipeStats(recipe);
@@ -52,7 +56,7 @@ near(C.measuredEfficiency(recipe, s.og, 21), 72, 0.01, 'measured efficiency roun
 
 // BeerJSON round trip keeps everything the editor uses.
 const back = fromBeerJSON(JSON.parse(JSON.stringify(toBeerJSON(recipe))))[0];
-for (const k of ['name', 'style', 'batchSize', 'boilTime', 'efficiency', 'fermentables', 'hops', 'yeasts', 'mash', 'fermentation', 'carbonation']) {
+for (const k of ['name', 'style', 'batchSize', 'boilTime', 'efficiency', 'fermentables', 'hops', 'yeasts', 'mash', 'fermentation', 'carbonation', 'family', 'version', 'versionNote', 'basedOn']) {
   assert.deepEqual(back[k], recipe[k], `BeerJSON round trip: ${k}`);
 }
 const s2 = C.recipeStats(back);
@@ -98,5 +102,31 @@ assert.ok(C.mashPh(stout, ro, 15.6, grainDiPh).ph < m0.ph - 0.05, 'roast malt lo
 near(C.residualAlkalinity({ ca: 110, mg: 10, hco3: 40 }) * 50, -51.6, 1, 'residual alkalinity as CaCO3');
 
 assert.match(toBeerXML(recipe), /<NAME>House Pale Ale<\/NAME>/);
+
+// Brew sheet PDF: a well-formed file whose cross-reference table points at each object,
+// with a page break once the content runs past one page.
+assert.equal(toWinAnsi('66 °C · 5 g – CO₂ → done'), '66 \xb0C \xb7 5 g \x96 CO2 -> done');
+const long = Array.from({ length: 60 }, (_, i) => ({ text: `Step ${i + 1}: a fairly long instruction that wraps onto a second line on the printed page`, done: i % 3 === 0 }));
+const pdf = sheetPdf({
+  title: 'House Pale Ale (v2)', subtitle: 'Version 2 · American Pale Ale · 21 L', colour: '#c98a2b', footer: 'test',
+  meta: [['Brewer', 'Stuart'], ['Brew date', null]], stats: [['OG', '1.051'], ['IBU', '38']],
+  sections: [
+    { title: 'Hops', table: { cols: [{ h: 'Name', w: 0.6 }, { h: 'g', w: 0.4, right: 1 }], rows: [['Citra', '40'], ['Actual', null]] } },
+    { title: 'Mash', half: true, text: 'Left' }, { title: 'Water', half: true, note: 'Right' },
+    { title: 'Brew day', checklist: long }, { title: 'Notes', lines: 4 },
+  ],
+});
+const raw = Buffer.from(pdf).toString('latin1');
+assert.ok(raw.startsWith('%PDF-1.4') && raw.trimEnd().endsWith('%%EOF'), 'PDF header and trailer');
+const xrefAt = +/startxref\n(\d+)/.exec(raw)[1];
+assert.ok(raw.startsWith('xref', xrefAt), 'startxref points at the xref table');
+const offsets = [...raw.slice(xrefAt).matchAll(/^(\d{10}) 00000 n $/gm)].map(x => +x[1]);
+offsets.forEach((o, i) => assert.ok(raw.startsWith(`${i + 1} 0 obj`, o), `xref offset of object ${i + 1}`));
+const pages = +/\/Count (\d+)/.exec(raw)[1];
+assert.ok(pages >= 2, `long checklist runs onto a second page, got ${pages}`);
+for (const m of raw.matchAll(/<< \/Length (\d+) >>\nstream\n/g)) {
+  assert.equal(raw.slice(m.index + m[0].length + +m[1], m.index + m[0].length + +m[1] + 10), '\nendstream', 'stream length');
+}
+assert.match(raw, /\(House Pale Ale \\\(v2\\\)\) Tj/, 'brackets in text are escaped');
 console.log('All checks passed.');
 console.log(`House Pale Ale: OG ${s.og.toFixed(3)}  FG ${s.fg.toFixed(3)}  ABV ${s.abv.toFixed(1)}  IBU ${s.ibu.toFixed(0)}  EBC ${s.ebc.toFixed(0)}`);

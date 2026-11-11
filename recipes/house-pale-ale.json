@@ -243,7 +243,7 @@
           ]
         },
         "carbonation": 2.4,
-        "notes": "Example recipe that ships with the app. Edit it, duplicate it or delete it.",
+        "notes": "Example recipe that ships with the app. Edit it, make a new version of it, or delete it.",
         "x_mash_ratio": {
           "unit": "l/kg",
           "value": 3

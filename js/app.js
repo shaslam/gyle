@@ -5,6 +5,7 @@ import { toBeerJSON, fromBeerJSON, blankRecipe } from './beerjson.js';
 import { store } from './store.js';
 import { timer } from './timer.js';
 import { fetchThingSpeak, stableFor } from './sources.js';
+import { sheetHtml, sheetPdf } from './brewsheet.js';
 
 // ---------- helpers ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -587,6 +588,97 @@ view.addEventListener('click', e => {
   if (fn) { e.preventDefault(); fn(b); }
 });
 
+// ---------- recipe versions ----------
+// Every version of a recipe is its own document. They share a `family` (the id of the first
+// version) and count up from version 1. Recipes from before versions existed have neither
+// field: they are version 1 of a family named after their own id.
+const familyOf = (id, r) => r?.family || id;
+const versionOf = r => +r?.version || 1;
+const vName = r => (versionOf(r) > 1 ? `${r.name} v${versionOf(r)}` : r.name);
+function versionsOf(family) {
+  return store.list('recipes').filter(x => familyOf(x.id, x.data) === family).sort((a, b) => versionOf(a.data) - versionOf(b.data));
+}
+// The newest version of each recipe: what the recipe list and the brew picker show.
+function latestOnly(list) {
+  const best = new Map();
+  for (const x of list) {
+    const f = familyOf(x.id, x.data), cur = best.get(f);
+    if (!cur || versionOf(x.data) > versionOf(cur.data)) best.set(f, x);
+  }
+  return [...best.values()];
+}
+// In the brew queue, a recipe's place passes to its newest version.
+function swapInQueue(oldId, newId) {
+  const order = store.get('settings', 'settings')?.brewOrder || [];
+  if (!order.includes(oldId)) return;
+  saveQueue(order.map(x => (x === oldId ? newId : x)).filter((x, i, a) => a.indexOf(x) === i));
+}
+
+// Popup: a new version of recipe `id`. It starts as a copy and takes the next free number.
+function newVersionDialog(id) {
+  const r = store.get('recipes', id), family = familyOf(id, r);
+  const all = versionsOf(family), next = versionOf(all.at(-1)?.data) + 1;
+  sheetDialog(`<div class="sec-head"><h2>New version</h2><button type="button" class="icon-btn" data-x aria-label="Close">×</button></div>
+    <p class="hint">Version ${next} starts as a copy of version ${versionOf(r)}. Version ${versionOf(r)} stays as it is, and brews made from it keep their link to it.</p>
+    <div class="row"><label class="fld w-name" for="nv-note"><span>What will change</span><input id="nv-note" autocomplete="off" placeholder="For example less crystal, more Citra"></label></div>
+    <div class="foot-actions"><button type="submit" class="btn primary">Create version ${next}</button><button type="button" class="btn" data-x>Cancel</button></div>`,
+  dlg => {
+    const copy = clone(r), nid = `${slug(r.name)}-v${next}-${uid()}`;
+    Object.assign(copy, { family, version: next, versionNote: dlg.querySelector('#nv-note').value.trim(), created: today(), modified: today() });
+    if (!copy.versionNote) delete copy.versionNote;
+    store.put('recipes', nid, copy);
+    swapInQueue(all.at(-1).id, nid);
+    location.hash = '#recipe/' + nid;
+    toast(`Version ${next} created.`);
+  });
+}
+
+// Popup: a new recipe with its own name, blank or started from another recipe.
+function newRecipeDialog(baseId = '') {
+  const choices = latestOnly(store.list('recipes')).sort((a, b) => a.data.name.localeCompare(b.data.name));
+  if (baseId && !choices.some(x => x.id === baseId)) choices.unshift({ id: baseId, data: store.get('recipes', baseId) }); // an older version
+  const base = baseId && store.get('recipes', baseId);
+  sheetDialog(`<div class="sec-head"><h2>New recipe</h2><button type="button" class="icon-btn" data-x aria-label="Close">×</button></div>
+    <div class="row"><label class="fld w-name" for="nr-name"><span>Name</span><input id="nr-name" autocomplete="off" value="${base ? '' : 'New recipe'}" placeholder="A name of its own"></label></div>
+    <div class="row"><label class="fld w-name" for="nr-base"><span>Start from</span><select id="nr-base"><option value="">A blank recipe</option>${choices.map(x => `<option value="${x.id}"${x.id === baseId ? ' selected' : ''}>${esc(vName(x.data))}</option>`).join('')}</select></label></div>
+    <p class="hint" id="nr-note" role="status">${base ? 'The new recipe starts as a copy and remembers what it was based on. To change this recipe and keep its name, make a new version instead.' : ''}</p>
+    <div class="foot-actions"><button type="submit" class="btn primary">Create recipe</button><button type="button" class="btn" data-x>Cancel</button></div>`,
+  dlg => {
+    const name = dlg.querySelector('#nr-name').value.trim(), from = dlg.querySelector('#nr-base').value, src = from && store.get('recipes', from);
+    const note = dlg.querySelector('#nr-note');
+    if (!name) { note.textContent = 'Give the recipe a name.'; dlg.querySelector('#nr-name').focus(); return false; }
+    if (store.list('recipes').some(x => x.data.name.trim().toLowerCase() === name.toLowerCase())) {
+      note.textContent = `There is already a recipe called ${name}. Choose another name, or open that recipe and make a new version of it.`;
+      dlg.querySelector('#nr-name').focus();
+      return false;
+    }
+    let r;
+    if (src) {
+      r = clone(src);
+      for (const k of ['family', 'version', 'versionNote']) delete r[k];
+      Object.assign(r, { name, status: 'planning', basedOn: { id: from, name: src.name, version: versionOf(src) } });
+    } else r = blankRecipe(defaultProfile());
+    Object.assign(r, { name, created: today(), modified: today() });
+    const id = `${slug(name)}-${uid()}`;
+    store.put('recipes', id, r);
+    location.hash = '#recipe/' + id;
+  }, dlg => dlg.querySelector('#nr-name').focus());
+}
+
+// A small popup with a form. onSubmit(dlg) returns false to keep it open.
+function sheetDialog(html, onSubmit, onOpen) {
+  document.querySelector('dialog.sheet')?.remove();
+  const dlg = document.createElement('dialog');
+  dlg.className = 'sheet';
+  dlg.innerHTML = `<form novalidate>${html}</form>`;
+  document.body.append(dlg);
+  dlg.addEventListener('click', e => { if (e.target.closest('[data-x]') || e.target === dlg) dlg.close(); });
+  dlg.querySelector('form').addEventListener('submit', e => { e.preventDefault(); if (onSubmit(dlg) !== false) dlg.close(); });
+  dlg.addEventListener('close', () => dlg.remove());
+  dlg.showModal();
+  (onOpen || (d => d.querySelector('input')?.focus()))(dlg);
+}
+
 // ---------- recipes list ----------
 // The brew queue: recipe ids in the order you plan to brew them, kept in settings.json
 // so one drag is one small commit. Recipes not in the list yet sit at the bottom.
@@ -665,7 +757,6 @@ let recipeSort = 'queue', recipeShow = 'all';
 const isReady = data => data.status === 'ready';
 
 function recipesView() {
-  const eq = defaultProfile();
   let shown = []; // what is on screen, in order
   ctx = {
     q: ctx.q || '',
@@ -676,11 +767,7 @@ function recipesView() {
     },
     change(t) { if (t.id === 'import-file') importFiles(t.files); },
     actions: {
-      new() {
-        const r = blankRecipe(eq), id = 'recipe-' + uid();
-        store.put('recipes', id, r);
-        location.hash = '#recipe/' + id;
-      },
+      new: () => newRecipeDialog(),
       import() { $('#import-file').click(); },
     },
   };
@@ -703,7 +790,7 @@ function recipesView() {
   });
   function draw() {
     const q = ctx.q.trim().toLowerCase();
-    const all = store.list('recipes');
+    const all = latestOnly(store.list('recipes'));
     const sorted = recipeSort === 'queue' ? queued(all)
       : recipeSort === 'name' ? [...all].sort((a, b) => a.data.name.localeCompare(b.data.name))
       : [...all].sort((a, b) => (b.data.modified || '').localeCompare(a.data.modified || '') || a.data.name.localeCompare(b.data.name));
@@ -721,7 +808,7 @@ function recipesView() {
         ${canDrag ? `<button type="button" class="grip" aria-label="Move ${esc(data.name)}, now number ${i + 1} in the queue. Drag, or use the up and down arrow keys."><b>${i + 1}</b><svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true"><g fill="currentColor"><circle cx="2" cy="2" r="1.6"/><circle cx="8" cy="2" r="1.6"/><circle cx="2" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="2" cy="14" r="1.6"/><circle cx="8" cy="14" r="1.6"/></g></svg></button>` : ''}
         <a class="item" href="#recipe/${id}">
         ${pint(C.srmToHex(s.srm), 34)}
-        <span class="item-main">${id === nextId ? '<span class="next-tag">Next brew</span>' : ''}<strong>${esc(data.name)}</strong><small>${esc(data.style || 'No style')} · ${n(data.batchSize, 0)} L${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small></span>
+        <span class="item-main">${id === nextId ? '<span class="next-tag">Next brew</span>' : ''}<strong>${esc(data.name)}</strong><small>${versionOf(data) > 1 ? `v${versionOf(data)} · ` : ''}${esc(data.style || 'No style')} · ${n(data.batchSize, 0)} L${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small></span>
         <span class="pill ${isReady(data) ? 's-finished' : ''}">${isReady(data) ? 'Ready' : 'Planning'}</span>
         <span class="item-stats"><span><b>${sg(s.og)}</b> OG</span><span><b>${n(s.ibu, 0)}</b> IBU</span><span><b>${n(s.abv)}</b> %</span></span>
       </a></div>`;
@@ -772,6 +859,22 @@ function gauge(key, label, value, text, range, rangeText, d = 0, extra = '', wor
   </div>`;
 }
 
+// Under the recipe name: which version this is, links to the others, and what it was based on.
+function versionBar(id, r) {
+  const all = versionsOf(familyOf(id, r)), latest = all.at(-1);
+  const based = r.basedOn && (store.get('recipes', r.basedOn.id)
+    ? `<a href="#recipe/${esc(r.basedOn.id)}">${esc(vName(r.basedOn))}</a>` : esc(vName(r.basedOn)));
+  const parts = [];
+  if (all.length > 1) {
+    parts.push(`<span class="v-list" aria-label="Versions">${all.map(x => x.id === id
+      ? `<b aria-current="page">v${versionOf(x.data)}</b>` : `<a href="#recipe/${x.id}" title="${esc(x.data.versionNote || '')}">v${versionOf(x.data)}</a>`).join('')}</span>`);
+  }
+  if (based) parts.push(`<span>Based on ${based}</span>`);
+  const old = latest && latest.id !== id
+    ? `<p class="v-old">This is version ${versionOf(r)}. The newest is <a href="#recipe/${latest.id}">version ${versionOf(latest.data)}</a>.</p>` : '';
+  return parts.length || old ? `<div class="v-bar">${parts.join('')}</div>${old}` : '';
+}
+
 function recipeView(id) {
   const r = store.get('recipes', id);
   if (!r) return notFound('recipe', '#recipes');
@@ -786,20 +889,17 @@ function recipeView(id) {
         if (!confirmTap(btn, 'Tap again to discard')) return;
         try { await store.revert('recipes', id); route(); } catch (e) { toast(e.message, true); }
       },
-      duplicate() {
-        const copy = clone(r), nid = `${slug(r.name)}-${uid()}`;
-        copy.name += ' (copy)'; copy.created = copy.modified = today();
-        store.put('recipes', nid, copy);
-        location.hash = '#recipe/' + nid;
-        toast('Duplicated.');
-      },
+      'new-version': () => newVersionDialog(id),
+      'new-from': () => newRecipeDialog(id),
       delete(btn) {
-        if (!confirmTap(btn, 'Tap again to delete')) return;
+        if (!confirmTap(btn, versionsOf(familyOf(id, r)).length > 1 ? `Tap again to delete v${versionOf(r)}` : 'Tap again to delete')) return;
+        const family = familyOf(id, r);
         store.remove('recipes', id);
-        location.hash = '#recipes';
+        const rest = versionsOf(family);
+        if (rest.length) { swapInQueue(id, rest.at(-1).id); location.hash = '#recipe/' + rest.at(-1).id; } else location.hash = '#recipes';
       },
-      'export-json': () => download(slug(r.name) + '.json', JSON.stringify(toBeerJSON(r), null, 2), 'application/json'),
-      'export-xml': () => download(slug(r.name) + '.xml', toBeerXML(r), 'text/xml'),
+      'export-json': () => download(slug(vName(r)) + '.json', JSON.stringify(toBeerJSON(r), null, 2), 'application/json'),
+      'export-xml': () => download(slug(vName(r)) + '.xml', toBeerXML(r), 'text/xml'),
       brew() { location.hash = '#brew/' + newBrew(id, r); },
       status(btn) { r.status = btn.dataset.v; ctx.touch(); update(); },
       'add-ferm': () => fermentableDialog(r, null, () => { ctx.touch(); renderList('fermentables'); update(); }),
@@ -849,6 +949,7 @@ function recipeView(id) {
     <section class="label-card">
       <div class="label-main"><span class="overline" id="hero-over"></span>
         <label class="title-fld" for="f-name"><span class="sr">Recipe name</span><input id="f-name" class="title-input" data-p="name" value="${esc(r.name)}"></label>
+        ${versionBar(id, r)}
         <div class="segs status" id="status-toggle" role="group" aria-label="Recipe status"></div></div>
       <div class="label-art" id="hero-art"></div>
     </section>
@@ -867,11 +968,14 @@ function recipeView(id) {
     <section class="card" id="sec-fermentation"></section>
     <section class="card"><div class="sec-head"><h2>Packaging & notes</h2></div>
       <div class="row">${field({ label: 'Carbonation, vols CO₂', num: 1, step: 0.1 }, 'carbonation', r.carbonation)}${field({ label: 'Mash ratio L/kg', num: 1, step: 0.1 }, 'mashRatio', r.mashRatio)}</div>
+      ${versionOf(r) > 1 ? field({ label: `What changed in version ${versionOf(r)}`, cls: 'block' }, 'versionNote', r.versionNote || '') : ''}
       ${field({ label: 'Notes', area: 5, cls: 'block' }, 'notes', r.notes)}
     </section>
     <div class="foot-actions">
       <button type="button" class="btn primary" data-act="brew">Brew this recipe</button>
-      <button type="button" class="btn" data-act="duplicate">Duplicate</button>
+      <a class="btn" href="#sheet/${id}">Brew sheet</a>
+      <button type="button" class="btn" data-act="new-version">New version</button>
+      <button type="button" class="btn" data-act="new-from">New recipe from this</button>
       <button type="button" class="btn" data-act="export-json">Export BeerJSON</button>
       <button type="button" class="btn" data-act="export-xml">Export BeerXML</button>
       <button type="button" class="btn danger" data-act="delete">Delete</button>
@@ -980,7 +1084,7 @@ function newBrew(recipeId, r) {
   const count = store.list('brews').length + 1;
   const id = `${today()}-${slug(r.name)}-${uid()}`;
   store.put('brews', id, {
-    name: `${r.name} #${count}`, recipeId, recipe: clone(r), equipment: clone(equipFor(r)), status: 'planned', brewDate: today(), packagedDate: '',
+    name: `${vName(r)} #${count}`, recipeId, recipe: clone(r), equipment: clone(equipFor(r)), status: 'planned', brewDate: today(), packagedDate: '',
     measured: { preBoilVol: null, preBoilSG: null, og: null, fermenterVol: null, fg: null },
     readings: [], checklist: {}, notes: '', tasting: '', rating: null,
   });
@@ -1065,7 +1169,7 @@ const clock = ms => {
 };
 
 function brewsView() {
-  const recipes = queued(store.list('recipes')); // queue order
+  const recipes = queued(latestOnly(store.list('recipes'))); // newest versions, in queue order
   const nextUp = recipes.find(r => r.data.status === 'ready')?.id; // first ready recipe is preselected
   ctx = {
     actions: {
@@ -1079,7 +1183,7 @@ function brewsView() {
   view.innerHTML = `
     <div class="page-head"><h1>Brews</h1></div>
     ${recipes.length ? `<div class="card"><div class="row">
-      <label class="fld w-name" for="brew-recipe"><span>Start a brew from</span><select id="brew-recipe">${recipes.map(r => `<option value="${r.id}"${r.id === nextUp ? ' selected' : ''}>${esc(r.data.name)}${r.data.status === 'ready' ? '' : ' (in planning)'}</option>`).join('')}</select></label>
+      <label class="fld w-name" for="brew-recipe"><span>Start a brew from</span><select id="brew-recipe">${recipes.map(r => `<option value="${r.id}"${r.id === nextUp ? ' selected' : ''}>${esc(vName(r.data))}${r.data.status === 'ready' ? '' : ' (in planning)'}</option>`).join('')}</select></label>
       <button type="button" class="btn primary" data-act="new">Start brew</button></div></div>` : ''}
     <div class="list">${brews.length ? brews.map(({ id, data: b, dirty }) => {
       const m = b.measured || {}, last = [...(b.readings || [])].filter(x => x.sg).sort((a, c) => (a.date || '').localeCompare(c.date || '')).at(-1);
@@ -1247,7 +1351,7 @@ function brewView(id) {
       ${field({ label: 'Status', opts: STATUSES }, 'status', b.status)}
       ${field({ label: 'Brew date', type: 'date' }, 'brewDate', b.brewDate)}
       ${field({ label: 'Packaged', type: 'date' }, 'packagedDate', b.packagedDate)}
-    </div><p class="hint">Recipe snapshot: ${store.get('recipes', b.recipeId) ? `<a href="#recipe/${b.recipeId}">${esc(r.name)}</a>` : esc(r.name)}, ${n(+r.batchSize, 0)} L on ${esc(eq.name || 'the default equipment')}. Later edits to the recipe or profile do not change this log.</p></section>
+    </div><p class="hint">Recipe snapshot: ${store.get('recipes', b.recipeId) ? `<a href="#recipe/${b.recipeId}">${esc(vName(r))}</a>` : esc(vName(r))}, ${n(+r.batchSize, 0)} L on ${esc(eq.name || 'the default equipment')}. Later edits to the recipe or profile do not change this log.</p></section>
     <section class="card"><div class="sec-head"><h2>Measurements</h2></div><div class="row">
       ${field({ label: 'Pre-boil L', num: 1 }, 'measured.preBoilVol', b.measured.preBoilVol)}
       ${field({ label: 'Pre-boil SG', num: 1, step: 0.001 }, 'measured.preBoilSG', b.measured.preBoilSG)}
@@ -1264,7 +1368,7 @@ function brewView(id) {
       ${field({ label: 'Brew notes', area: 4, cls: 'block' }, 'notes', b.notes)}
       ${field({ label: 'Tasting notes', area: 4, cls: 'block' }, 'tasting', b.tasting)}
       <div class="row">${field({ label: 'Rating, 1 to 5', num: 1 }, 'rating', b.rating)}</div></section>
-    <div class="foot-actions"><button type="button" class="btn danger" data-act="delete">Delete brew log</button></div>`;
+    <div class="foot-actions"><a class="btn" href="#sheet/brew/${id}">Brew sheet</a><button type="button" class="btn danger" data-act="delete">Delete brew log</button></div>`;
   renderList('readings');
 
   function update() {
@@ -1298,6 +1402,99 @@ function brewView(id) {
   drawDevice();
   // While a brew is fermenting, pull new hydrometer readings each time its log is opened.
   if (b.device?.channel && ['fermenting', 'conditioning'].includes(b.status)) fetchDevice(true);
+}
+
+// ---------- brew sheet ----------
+// The sheet for a recipe (#sheet/<recipe id>) has blanks to fill in by hand. The sheet for a
+// brew log (#sheet/brew/<brew id>) uses the log's recipe snapshot and fills in what was measured.
+function sheetModel(r, eq, b = null) {
+  const s = C.recipeStats(r, eq), m = b?.measured || {};
+  const val = (v, f) => (v == null || v === '' || !Number.isFinite(+v) ? null : f(+v));
+  const steps = brewSteps(r, eq);
+  const acid = r.water?.acid?.ml > 0 ? `${n(+r.water.acid.ml)} ml ${(C.ACIDS[r.water.acid.type] || C.ACIDS.lactic88).name.toLowerCase()}` : '';
+  const ph = s.grainKg > 0 ? C.mashPh(r, C.waterWithSalts(sourceFor(r), r.water?.salts, s.totalWater), s.mashWater, grainDiPh) : null;
+  const sections = [];
+  sections.push({ title: 'Fermentables', table: {
+    cols: [{ h: 'Name', w: 0.5 }, { h: 'Type', w: 0.17 }, { h: 'EBC', w: 0.1, right: 1 }, { h: 'kg', w: 0.12, right: 1 }, { h: '%', w: 0.11, right: 1 }],
+    rows: (r.fermentables || []).map((f, i) => [f.name, f.type || 'grain', n(+f.color, 0), n(+f.amount, 2), n(s.fermPct[i], 0)]),
+  } });
+  sections.push({ title: 'Hops', table: {
+    cols: [{ h: 'Name', w: 0.3 }, { h: 'When', w: 0.36 }, { h: 'Alpha', w: 0.12, right: 1 }, { h: 'g', w: 0.1, right: 1 }, { h: 'IBU', w: 0.12, right: 1 }],
+    rows: (r.hops || []).map((h, i) => [h.name, hopWhen(h), n(+h.alpha, 1), n(+h.amount, 0), h.use === 'dry hop' ? '' : n(s.hopIbus[i], 0)]),
+  } });
+  if (r.mash?.length && s.grainKg > 0) sections.push({ title: 'Mash', half: true, table: {
+    cols: [{ h: 'Step', w: 0.56 }, { h: '°C', w: 0.22, right: 1 }, { h: 'Min', w: 0.22, right: 1 }],
+    rows: r.mash.map(x => [x.name, n(+x.temp, 1), n(+x.time, 0)]),
+  }, note: `Mash ${n(s.grainKg, 2)} kg in ${n(s.mashWater)} L at ${n(s.strikeTemp)} °C strike. Sparge ${n(s.spargeWater)} L.` });
+  sections.push({ title: 'Water', half: true, table: {
+    cols: [{ h: 'Item', w: 0.55 }, { h: 'Amount', w: 0.45, right: 1 }],
+    rows: [
+      ['Source water', sourceFor(r).name],
+      ...(targetFor(r) ? [['Target profile', targetFor(r).name]] : []),
+      ...Object.entries(C.SALTS).filter(([k]) => r.water?.salts?.[k] > 0).map(([k, d]) => [d.name, `${n(+r.water.salts[k])} g`]),
+      ...(acid ? [['Acid, in the mash water', acid]] : []),
+      ...(ph ? [['Estimated mash pH', n(ph.ph, 2)]] : []),
+    ],
+  }, note: `Salts go in all ${n(s.totalWater)} L of brewing water.` });
+  if (r.yeasts?.length) sections.push({ title: 'Yeast', half: true, table: {
+    cols: [{ h: 'Name', w: 0.5 }, { h: 'Form', w: 0.2 }, { h: 'Atten.', w: 0.16, right: 1 }, { h: 'Packs', w: 0.14, right: 1 }],
+    rows: r.yeasts.map(y => [[y.name, y.lab && `(${y.lab})`].filter(Boolean).join(' '), y.form || '', `${n(+y.attenuation, 0)} %`, n(+y.amount || 0, 0)]),
+  } });
+  if (r.fermentation?.length) sections.push({ title: 'Fermentation', half: true, table: {
+    cols: [{ h: 'Step', w: 0.56 }, { h: '°C', w: 0.22, right: 1 }, { h: 'Days', w: 0.22, right: 1 }],
+    rows: r.fermentation.map(x => [x.name, n(+x.temp, 1), n(+x.days, 0)]),
+  } });
+  if (r.miscs?.length) sections.push({ title: 'Other additions', table: {
+    cols: [{ h: 'Name', w: 0.4 }, { h: 'Type', w: 0.18 }, { h: 'When', w: 0.24 }, { h: 'Amount', w: 0.18, right: 1 }],
+    rows: r.miscs.map(x => [x.name, x.type || 'other', miscWhen({ ...x, type: '' }), `${x.amount} ${x.unit === 'each' ? '' : x.unit}`.trim()]),
+  } });
+  sections.push({ title: 'Brew day', checklist: steps.map((text, i) => ({ text, done: !!b?.checklist?.['s' + i] })) });
+  sections.push({ title: 'Measurements', table: {
+    cols: [{ h: '', w: 0.46 }, { h: 'Plan', w: 0.27, right: 1 }, { h: 'Actual', w: 0.27, right: 1 }],
+    rows: [
+      ["Mash pH", ph ? n(targetPh(r), 2) : '–', null],
+      ['Pre-boil volume, L', n(s.preBoilVol), val(m.preBoilVol, v => n(v))],
+      ['Pre-boil gravity', sg(s.preBoilSG), val(m.preBoilSG, sg)],
+      ['Original gravity', sg(s.og), val(m.og, sg)],
+      ['Into the fermenter, L', n(+r.batchSize), val(m.fermenterVol, v => n(v))],
+      ['Pitch temperature, °C', n(+(r.fermentation?.[0]?.temp ?? 19), 0), null],
+      ['Final gravity', sg(s.fg), val(m.fg, sg)],
+      ['ABV %', n(s.abv), m.og && m.fg ? n(C.abv(+m.og, +m.fg)) : null],
+    ],
+  } });
+  const notes = [r.versionNote && `What changed in version ${versionOf(r)}: ${r.versionNote}`, r.notes, b?.notes].filter(Boolean).join('\n\n');
+  sections.push({ title: 'Notes', text: notes, lines: b?.notes ? 3 : 6 });
+  return {
+    title: b ? b.name : vName(r),
+    subtitle: [b ? vName(r) : versionOf(r) > 1 ? `Version ${versionOf(r)}` : '', r.style || 'No style', `${n(+r.batchSize, 0)} L`, r.basedOn ? `based on ${vName(r.basedOn)}` : ''].filter(Boolean).join(' · '),
+    colour: C.srmToHex(s.srm),
+    meta: [['Brewer', r.author || null], ['Equipment', eq.name || 'Default'], ['Brew date', b?.brewDate || null], ['Boil', `${n(+r.boilTime, 0)} min`]],
+    stats: [['OG', sg(s.og)], ['FG', sg(s.fg)], ['ABV', `${n(s.abv)} %`], ['IBU', n(s.ibu, 0)], ['Colour', `${n(s.ebc, 0)} EBC`], ['Efficiency', `${n(+r.efficiency, 0)} %`], ['CO2', `${n(+r.carbonation)} vols`]],
+    sections,
+    footer: `Gyle brew sheet · ${vName(r)} · printed ${today()}`,
+  };
+}
+const targetPh = r => +r.water?.targetPh || 5.4;
+
+function sheetView(arg) {
+  const [kind, bid] = arg.split('/');
+  const b = kind === 'brew' ? store.get('brews', bid) : null;
+  const r = b ? b.recipe : store.get('recipes', arg);
+  if (!r) return notFound(kind === 'brew' ? 'brew' : 'recipe', kind === 'brew' ? '#brews' : '#recipes');
+  const eq = b ? b.equipment || equipFor(r) : equipFor(r);
+  const back = b ? `#brew/${bid}` : `#recipe/${arg}`;
+  const model = sheetModel(r, eq, b);
+  ctx = {
+    actions: {
+      print: () => window.print(),
+      pdf: () => download(`${slug(model.title)}-brew-sheet.pdf`, sheetPdf(model), 'application/pdf'),
+    },
+  };
+  view.innerHTML = `
+    <div class="page-head no-print"><a class="back" href="${back}">← ${b ? 'Brew log' : 'Recipe'}</a>
+      <div class="actions"><button type="button" class="btn" data-act="print">Print</button><button type="button" class="btn primary" data-act="pdf">Download PDF</button></div></div>
+    <p class="hint on-wall no-print">${b ? 'Filled in from this brew log. ' : 'Blanks are for writing in on brew day. '}Print uses your browser's print dialog, which can also save a PDF.</p>
+    ${sheetHtml(model)}`;
 }
 
 // ---------- tools ----------
@@ -1607,7 +1804,7 @@ function notFound(what, back) {
   view.innerHTML = `<div class="empty-state"><h2>That ${what} is not here</h2><p>It may have been deleted, or not synced to this device yet.</p><a class="btn" href="${back}">Back</a></div>`;
 }
 
-const ROUTES = { recipes: recipesView, recipe: recipeView, brews: brewsView, brew: brewView, tools: toolsView, tool: toolView, settings: settingsView };
+const ROUTES = { recipes: recipesView, recipe: recipeView, sheet: sheetView, brews: brewsView, brew: brewView, tools: toolsView, tool: toolView, settings: settingsView };
 const TAB_OF = { recipe: 'recipes', brew: 'brews', tool: 'tools' };
 let routeKey = '';
 
@@ -1615,7 +1812,8 @@ function route(keepScroll = false) {
   const [name, ...rest] = location.hash.replace(/^#/, '').split('/');
   const key = ROUTES[name] ? name : 'recipes';
   routeKey = key + '/' + rest.join('/');
-  document.querySelectorAll('#tabs a').forEach(a => a.toggleAttribute('aria-current', a.dataset.tab === (TAB_OF[key] || key)));
+  const tab = key === 'sheet' ? (rest[0] === 'brew' ? 'brews' : 'recipes') : TAB_OF[key] || key;
+  document.querySelectorAll('#tabs a').forEach(a => a.toggleAttribute('aria-current', a.dataset.tab === tab));
   ROUTES[key](rest.join('/'));
   if (keepScroll !== true) window.scrollTo(0, 0);
 }
