@@ -557,6 +557,8 @@ img.photo.missing { min-height: 64px; padding: 10px; border: 1.5px dashed var(--
 img.clip-img { width: auto; max-width: 96px; max-height: 140px; object-fit: contain; border-radius: 6px; box-shadow: 0 6px 14px rgb(40 26 4 / .3); }
 .clip-thumb { flex: 0 0 34px; display: flex; justify-content: center; }
 .clip-thumb img { width: auto; max-width: 40px; max-height: 50px; object-fit: contain; border-radius: 4px; box-shadow: 0 2px 5px rgb(40 26 4 / .3); }
+.clip-links { display: flex; flex-wrap: wrap; gap: 0 16px; margin-top: 6px; }
+label.link-btn { display: inline-flex; align-items: center; }
 .tl-add { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .file-btn { cursor: pointer; }
 input.sr:focus-visible + .file-btn { outline: 3px solid var(--gold); outline-offset: 2px; }

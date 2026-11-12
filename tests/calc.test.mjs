@@ -26,6 +26,7 @@ const recipe = {
   yeasts: [{ name: 'SafAle US-05', lab: 'Fermentis', form: 'dry', attenuation: 81, amount: 1 }],
   family: 'house-pale-ale', version: 2, versionNote: 'More Citra',
   basedOn: { id: 'best-bitter-x1', name: 'Best Bitter', version: 3 },
+  pumpClip: { id: 'pabc123', w: 600, h: 800 },
 };
 
 const s = C.recipeStats(recipe);
@@ -67,7 +68,7 @@ near(C.measuredEfficiency(recipe, s.og, 21), 72, 0.01, 'measured efficiency roun
 
 // BeerJSON round trip keeps everything the editor uses.
 const back = fromBeerJSON(JSON.parse(JSON.stringify(toBeerJSON(recipe))))[0];
-for (const k of ['name', 'style', 'batchSize', 'boilTime', 'efficiency', 'fermentables', 'hops', 'yeasts', 'mash', 'fermentation', 'carbonation', 'family', 'version', 'versionNote', 'basedOn']) {
+for (const k of ['name', 'style', 'batchSize', 'boilTime', 'efficiency', 'fermentables', 'hops', 'yeasts', 'mash', 'fermentation', 'carbonation', 'family', 'version', 'versionNote', 'basedOn', 'pumpClip']) {
   assert.deepEqual(back[k], recipe[k], `BeerJSON round trip: ${k}`);
 }
 const s2 = C.recipeStats(back);

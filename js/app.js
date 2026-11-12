@@ -109,6 +109,39 @@ function loadPhotos(root) {
 }
 // Every photo a brew log uses, for deleting them with the log.
 const photoIdsOf = b => [...new Set([...(b.timeline || []).map(e => e.photo?.id), b.pumpClip?.id].filter(Boolean))];
+// A photo file can serve several documents: every version of a recipe shares one pump clip, and a
+// brew's clip can be given to its recipe. Remove the file only when nothing uses it any more.
+const photoInUse = pid => store.list('recipes').some(x => x.data.pumpClip?.id === pid) || store.list('brews').some(x => photoIdsOf(x.data).includes(pid));
+function dropPhoto(pid) {
+  if (pid && !photoInUse(pid)) photos.remove(pid, store.connected).catch(() => {});
+}
+// Shrink a picked picture and keep it in this browser. Resolves what a document stores about it.
+async function keepPhoto(file, max) {
+  const { blob, w, h } = await shrink(file, max);
+  const pid = newPhotoId();
+  await photos.add(pid, blob);
+  return { id: pid, w, h };
+}
+// The recipe that a brew was made from as it is now, or its newest version if that one was deleted.
+function recipeOfBrew(b) {
+  if (store.get('recipes', b.recipeId)) return { id: b.recipeId, data: store.get('recipes', b.recipeId) };
+  return versionsOf(familyOf(b.recipeId, b.recipe)).at(-1) || null;
+}
+// The pump clip to show for a brew: its own, or else the recipe's. Every version of a recipe has the same one.
+const clipOf = b => b.pumpClip || recipeOfBrew(b)?.data.pumpClip || null;
+// Give every version of a recipe the same pump clip (null removes it), then remove the old file if it is free.
+function setRecipeClip(id, clip) {
+  const r = store.get('recipes', id);
+  const old = new Set();
+  for (const v of versionsOf(familyOf(id, r))) {
+    if (v.data.pumpClip?.id) old.add(v.data.pumpClip.id);
+    if (clip) v.data.pumpClip = { ...clip }; else delete v.data.pumpClip;
+    v.data.modified = today();
+    store.touch('recipes', v.id);
+  }
+  old.forEach(dropPhoto);
+}
+const clipThumb = clip => `<span class="clip-thumb">${photoImg(clip, '', '')}</span>`;
 // A time as the value of a datetime-local input, in local time.
 const localStamp = ms => { const d = new Date(ms); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
 function photoDialog(pid, caption, when) {
@@ -709,7 +742,7 @@ function newRecipeDialog(baseId = '') {
     let r;
     if (src) {
       r = clone(src);
-      for (const k of ['family', 'version', 'versionNote']) delete r[k];
+      for (const k of ['family', 'version', 'versionNote', 'pumpClip']) delete r[k];
       Object.assign(r, { name, status: 'planning', basedOn: { id: from, name: src.name, version: versionOf(src) } });
     } else r = blankRecipe(defaultProfile());
     Object.assign(r, { name, created: today(), modified: today() });
@@ -871,13 +904,17 @@ function recipesView() {
     return `<div class="q-row${archived ? ' archived' : ''}">
       ${canDrag ? grip(data.name, i, id) : ''}
       <a class="item" href="#recipe/${id}">
-      ${pint(C.srmToHex(s.srm), 34)}
+      ${data.pumpClip ? clipThumb(data.pumpClip) : pint(C.srmToHex(s.srm), 34)}
       <span class="item-main">${id === nextId ? '<span class="next-tag">Next brew</span>' : ''}<strong>${esc(data.name)}</strong><small>${versionOf(data) > 1 ? `v${versionOf(data)} · ` : ''}${esc(data.style || 'No style')} · ${n(data.batchSize, 0)} L${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small></span>
       <span class="pill ${pillCls}">${pillText}</span>
       <span class="item-stats"><span><b>${sg(s.og)}</b> OG</span><span><b>${n(s.ibu, 0)}</b> IBU</span><span><b>${n(s.abv)}</b> %</span></span>
       </a>${archived ? `<button type="button" class="btn small restore" data-act="restore" data-id="${id}" aria-label="Bring ${esc(data.name)} back to the brew queue">Restore</button>` : ''}</div>`;
   }
   function draw() {
+    drawRows();
+    loadPhotos($('#recipe-list')); // pump clips in place of pints
+  }
+  function drawRows() {
     const q = ctx.q.trim().toLowerCase();
     const all = latestOnly(store.list('recipes'));
     const sorted = recipeSort === 'queue' ? queued(all)
@@ -948,7 +985,7 @@ async function importFiles(files) {
         const wanted = r.name;
         r.name = freeName(wanted);
         if (r.name !== wanted) renamed.push(`${wanted} as ${r.name}`);
-        for (const k of ['family', 'version', 'versionNote']) delete r[k]; // an import starts its own recipe
+        for (const k of ['family', 'version', 'versionNote', 'pumpClip']) delete r[k]; // an import starts its own recipe
         const id = `${slug(r.name)}-${uid()}`;
         r.modified = today();
         store.put('recipes', id, r);
@@ -1055,6 +1092,7 @@ function recipeView(id) {
       if (!problem) rename(name);
     },
     change(t) {
+      if (t.id === 'clip-file') { setClip(t.files[0]); t.value = ''; return; }
       if (t.id !== 'f-name') return;
       if (t.hasAttribute('aria-invalid')) rename(ctx.nameBefore ?? r.name);
       t.value = r.name;
@@ -1068,7 +1106,14 @@ function recipeView(id) {
       save: () => commit('recipes', id),
       async revert(btn) {
         if (!confirmTap(btn, 'Tap again to discard')) return;
-        try { await store.revert('recipes', id); route(); } catch (e) { toast(e.message, true); }
+        const clip = r.pumpClip?.id;
+        try { await store.revert('recipes', id); dropPhoto(clip); route(); } catch (e) { toast(e.message, true); }
+      },
+      'clip-view': () => r.pumpClip && photoDialog(r.pumpClip.id, `Pump clip for ${r.name}`),
+      'clip-del'(btn) {
+        if (!confirmTap(btn, 'Tap again to remove')) return;
+        setRecipeClip(id, null);
+        update();
       },
       'new-version': () => newVersionDialog(id),
       'new-from': () => newRecipeDialog(id),
@@ -1076,6 +1121,7 @@ function recipeView(id) {
         if (!confirmTap(btn, versionsOf(familyOf(id, r)).length > 1 ? `Tap again to delete v${versionOf(r)}` : 'Tap again to delete')) return;
         const family = familyOf(id, r);
         store.remove('recipes', id);
+        dropPhoto(r.pumpClip?.id);
         const rest = versionsOf(family);
         if (rest.length) { swapInQueue(id, rest.at(-1).id); location.hash = '#recipe/' + rest.at(-1).id; } else location.hash = '#recipes';
       },
@@ -1141,6 +1187,15 @@ function recipeView(id) {
     update();
   }
 
+  // The pump clip belongs to the beer, so every version of the recipe gets it.
+  async function setClip(file) {
+    if (!file) return;
+    try {
+      setRecipeClip(id, await keepPhoto(file, 1000));
+      update();
+    } catch (e) { toast(e.message, true); }
+  }
+
   view.innerHTML = `
     <div class="page-head"><a class="back" href="#recipes">← Recipes</a>
       <div class="actions"><button type="button" class="btn ghost" id="revert-btn" data-act="revert" hidden>Discard changes</button><button type="button" class="btn primary" id="save-btn" data-act="save"></button></div>
@@ -1150,7 +1205,8 @@ function recipeView(id) {
         <label class="title-fld" for="f-name"><span class="sr">Recipe name</span><input id="f-name" class="title-input" value="${esc(r.name)}" aria-describedby="name-err"></label>
         <p class="name-err" id="name-err" role="status"></p>
         ${versionBar(id, r)}
-        <div class="segs status" id="status-toggle" role="group" aria-label="Recipe status"></div></div>
+        <div class="segs status" id="status-toggle" role="group" aria-label="Recipe status"></div>
+        <div class="clip-links" id="clip-links"></div></div>
       <div class="label-art" id="hero-art"></div>
     </section>
     <section class="gauges" id="gauges" aria-label="Recipe numbers"></section>
@@ -1210,7 +1266,16 @@ function recipeView(id) {
     const status = statusOf(r);
     $('#status-toggle').innerHTML = [['planning', 'In planning'], ['ready', 'Ready to brew'], ['archived', 'Archived']].map(([v, t]) =>
       `<button type="button" class="seg${v === status ? ' on' : ''}" data-act="status" data-v="${v}" aria-pressed="${v === status}">${t}</button>`).join('');
-    $('#hero-art').innerHTML = pint(C.srmToHex(s.srm), 84, 1, !poured) + `<span class="stamp"><b>${n(s.abv)}</b>% ABV</span>`;
+    const art = $('#hero-art'), clip = r.pumpClip;
+    if (!clip) art.innerHTML = pint(C.srmToHex(s.srm), 84, 1, !poured) + `<span class="stamp"><b>${n(s.abv)}</b>% ABV</span>`;
+    if ((clip?.id || '') !== (art.dataset.clip ?? '-')) { // only when the clip changes, so typing does not make the picture blink
+      art.dataset.clip = clip?.id || '';
+      art.classList.toggle('has-clip', !!clip);
+      if (clip) art.innerHTML = `<button type="button" class="clip-btn" data-act="clip-view" aria-label="Open the pump clip">${photoImg(clip, 'clip-img', `Pump clip for ${r.name}`)}</button>`;
+      loadPhotos(art);
+      $('#clip-links').innerHTML = `<input type="file" id="clip-file" class="sr" accept="image/*"><label class="link-btn file-btn" for="clip-file">${clip ? 'Change pump clip' : 'Add pump clip'}</label>
+        ${clip ? '<button type="button" class="link-btn danger" data-act="clip-del">Remove</button>' : ''}`;
+    }
     poured = true;
     $('#fit-line').innerHTML = +r.batchSize === +eq.batchSize && +r.efficiency === +eq.efficiency
       ? `Water volumes and IBU use the ${esc(eq.name)} profile.`
@@ -1282,8 +1347,10 @@ const STATUSES = ['planned', 'brew day', 'fermenting', 'conditioning', 'packaged
 function newBrew(recipeId, r) {
   const count = store.list('brews').length + 1;
   const id = `${today()}-${slug(r.name)}-${uid()}`;
+  const snap = clone(r);
+  delete snap.pumpClip; // the log shows the recipe's clip as it is now, or one of its own
   store.put('brews', id, {
-    name: `${vName(r)} #${count}`, recipeId, recipe: clone(r), equipment: clone(equipFor(r)), status: 'planned', brewDate: today(), packagedDate: '',
+    name: `${vName(r)} #${count}`, recipeId, recipe: snap, equipment: clone(equipFor(r)), status: 'planned', brewDate: today(), packagedDate: '',
     measured: { preBoilVol: null, preBoilSG: null, og: null, fermenterVol: null, fg: null },
     readings: [], checklist: {}, notes: '', tasting: '', rating: null,
   });
@@ -1553,7 +1620,7 @@ function brewsView() {
       const auto = inBeer(b.deviceReadings).at(-1), last = auto && (!typed || auto.t.slice(0, 10) >= (typed.date || '')) ? auto : typed;
       const fg = m.fg || last?.sg, hex = C.srmToHex(C.recipeStats(b.recipe, b.equipment || equipFor(b.recipe)).srm);
       return `<a class="item" href="#brew/${id}">
-        ${b.pumpClip ? `<span class="clip-thumb">${photoImg(b.pumpClip, '', '')}</span>` : pint(hex, 34)}
+        ${clipOf(b) ? clipThumb(clipOf(b)) : pint(hex, 34)}
         <span class="item-main"><strong>${esc(b.name)}</strong><small>${esc(b.brewDate || 'no date')}${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small>${ratingOf(b) ? ratingPints(ratingOf(b), hex) : ''}</span>
         <span class="pill s-${b.status.replace(' ', '-')}">${esc(b.status)}</span>
         <span class="item-stats"><span><b>${sg(m.og)}</b> OG</span><span><b>${sg(fg)}</b> SG</span><span><b>${m.og && fg ? n(C.abv(m.og, fg)) : '–'}</b> %</span></span>
@@ -1631,8 +1698,9 @@ function brewView(id) {
       save: () => commit('brews', id),
       delete(btn) {
         if (!confirmTap(btn, 'Tap again to delete')) return;
-        photoIdsOf(b).forEach(p => photos.remove(p, store.connected).catch(() => {}));
+        const mine = photoIdsOf(b);
         store.remove('brews', id);
+        mine.forEach(dropPhoto);
         location.hash = '#brews';
       },
     },
@@ -1832,23 +1900,14 @@ function brewView(id) {
   function drawArt() {
     const el = $('#label-art');
     if (!el) return;
-    el.classList.toggle('has-clip', !!b.pumpClip);
-    el.innerHTML = b.pumpClip
-      ? `<button type="button" class="clip-btn" data-act="tl-view" data-photo-id="${b.pumpClip.id}" aria-label="Open the pump clip">${photoImg(b.pumpClip, 'clip-img', `Pump clip for ${b.name}`)}</button>`
+    const clip = clipOf(b);
+    el.classList.toggle('has-clip', !!clip);
+    el.innerHTML = clip
+      ? `<button type="button" class="clip-btn" data-act="tl-view" data-photo-id="${clip.id}" aria-label="Open the pump clip">${photoImg(clip, 'clip-img', `Pump clip for ${b.name}`)}</button>`
       : `${pint(C.srmToHex(plan.srm), 84, 1, true)}<span class="stamp"><b>${n(plan.abv)}</b>% plan</span>`;
     loadPhotos(el);
   }
-  const usedInTimeline = pid => (b.timeline || []).some(e => e.photo?.id === pid);
-  function forgetPhoto(pid) {
-    if (!pid || usedInTimeline(pid) || b.pumpClip?.id === pid) return;
-    photos.remove(pid, store.connected).catch(() => {});
-  }
-  async function keepPhoto(file, max) {
-    const { blob, w, h } = await shrink(file, max);
-    const pid = newPhotoId();
-    await photos.add(pid, blob);
-    return { id: pid, w, h };
-  }
+  const forgetPhoto = dropPhoto; // `b` is the stored log, so the check sees the change just made
   async function addPhotos(files) {
     if (!files.length) return;
     toast(files.length > 1 ? `Adding ${files.length} photos…` : 'Adding the photo…');
@@ -1872,6 +1931,13 @@ function brewView(id) {
       forgetPhoto(old);
       ctx.touch(); drawArt(); drawTimeline();
     } catch (e) { toast(e.message, true); }
+  }
+  // Under the buttons: where the clip at the top comes from, and what can be done with it.
+  function clipLine() {
+    const rec = recipeOfBrew(b);
+    if (!b.pumpClip) return rec?.data.pumpClip ? '<p class="hint">The pump clip at the top comes from the recipe. Add one here to give this brew its own.</p>' : '';
+    return `<div class="tl-actions">${rec && rec.data.pumpClip?.id !== b.pumpClip.id ? '<button type="button" class="link-btn" data-act="clip-recipe">Use this pump clip for the recipe too</button>' : ''}
+      <button type="button" class="link-btn danger" data-act="clip-del">Remove the pump clip</button></div>`;
   }
   function drawTimeline() {
     const el = $('#sec-timeline');
@@ -1904,7 +1970,7 @@ function brewView(id) {
         <button type="button" class="btn" data-act="tl-note">Add note</button>
         <input type="file" id="clip-file" class="sr" accept="image/*"><label class="btn file-btn" for="clip-file">${b.pumpClip ? 'Change pump clip' : 'Add pump clip'}</label>
       </div>
-      ${b.pumpClip ? '<div class="tl-actions"><button type="button" class="link-btn danger" data-act="clip-del">Remove the pump clip</button></div>' : ''}
+      ${clipLine()}
       ${groups.length ? `<ol class="timeline">${groups.map(g => `<li class="tl-day"><h3>${g.d === 'no date' ? 'No date' : day(g.d)}</h3><ol>${g.items.map(entry).join('')}</ol></li>`).join('')}</ol>` : ''}`;
     loadPhotos(el);
   }
@@ -1939,9 +2005,16 @@ function brewView(id) {
       forgetPhoto(old);
       ctx.touch(); drawArt(); drawTimeline();
     },
+    'clip-recipe'() {
+      const rec = recipeOfBrew(b);
+      if (!rec || !b.pumpClip) return;
+      setRecipeClip(rec.id, b.pumpClip);
+      drawTimeline();
+      toast('The recipe now has this pump clip. Its other brews show it too.');
+    },
     'tl-view'(btn) {
       const pid = btn.dataset.photoId, e = (b.timeline || []).find(x => x.photo?.id === pid);
-      photoDialog(pid, e?.text || (b.pumpClip?.id === pid ? 'Pump clip' : ''), e?.t);
+      photoDialog(pid, e?.text || (clipOf(b)?.id === pid ? 'Pump clip' : ''), e?.t);
     },
   });
 

@@ -6,7 +6,8 @@
 // equipment profile the recipe was designed on, and x_status is 'planning', 'ready' or 'archived'.
 // Versions: x_family is shared by every version of a recipe (the id of the first one), x_version
 // counts from 1, x_version_note says what changed, and x_based_on names the recipe a new
-// recipe was started from ({ id, name, version }). Other software ignores all of them.
+// recipe was started from ({ id, name, version }). x_pump_clip is the recipe's pump clip photo
+// ({ id, w, h }); the picture is a file of its own (see photos.js). Other software ignores all of them.
 
 import { lovibondToSrm, srmToEbc, platoToSg, yieldToPotential, findStyleSafe } from './units.js';
 
@@ -97,6 +98,7 @@ export function toBeerJSON(r) {
     ...(r.version > 1 ? { x_version: r.version } : {}),
     ...(r.versionNote ? { x_version_note: r.versionNote } : {}),
     ...(r.basedOn ? { x_based_on: r.basedOn } : {}),
+    ...(r.pumpClip?.id ? { x_pump_clip: { id: String(r.pumpClip.id), w: +r.pumpClip.w || 0, h: +r.pumpClip.h || 0 } } : {}),
   };
   return { beerjson: { version: 1.0, recipes: [recipe] } };
 }
@@ -176,6 +178,7 @@ export function recipeFromJSON(j) {
     ...(j.x_version > 1 ? { version: Math.round(+j.x_version) } : {}),
     ...(j.x_version_note ? { versionNote: String(j.x_version_note) } : {}),
     ...(j.x_based_on?.name ? { basedOn: j.x_based_on } : {}),
+    ...(j.x_pump_clip?.id ? { pumpClip: { id: String(j.x_pump_clip.id), w: +j.x_pump_clip.w || 0, h: +j.x_pump_clip.h || 0 } } : {}),
     fermentables: (ing.fermentable_additions || []).map(f => ({
       name: f.name || '', type: f.type || 'grain', amount: round(kilos(f.amount) ?? 0),
       potential: potential(f.yield), color: round(ebc(f.color), 1),

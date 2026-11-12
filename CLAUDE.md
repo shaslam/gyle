@@ -23,7 +23,7 @@ Always run `node tests/calc.test.mjs` after touching `js/calc.js`, `js/data.js` 
 
 - Plain ES modules, hand-written HTML strings, one stylesheet. Do not add a framework, bundler or npm dependency without asking.
 - Everything is metric internally and in the UI: litres, kg, g, °C, EBC (SRM is shown alongside in places).
-- Recipes are stored as BeerJSON 1.0. App-only fields go under `x_` keys (`x_use`, `x_temp`, `x_mash_ratio`, `x_equipment`, `x_status`, `x_water`, and for versions `x_family`, `x_version`, `x_version_note`, `x_based_on`). Keep the round trip in the tests passing.
+- Recipes are stored as BeerJSON 1.0. App-only fields go under `x_` keys (`x_use`, `x_temp`, `x_mash_ratio`, `x_equipment`, `x_status`, `x_water`, and for versions `x_family`, `x_version`, `x_version_note`, `x_based_on`, and `x_pump_clip`). Keep the round trip in the tests passing.
 - The app must stay usable on a phone at about 390 px wide with no sideways scroll.
 - No `alert`/`confirm`/`prompt`: destructive buttons use the two-tap `confirmTap` helper.
 - UK spelling in UI text ("colour"). Plain, short labels.
@@ -75,8 +75,11 @@ A recipe started from another one gets a new family and `basedOn: { id, name, ve
 ### Brew photos and timeline
 
 A brew log has `timeline: [{ id, t, text, stage?, photo?: { id, w, h } }]` (`t` is a local
-`datetime-local` value) and `pumpClip: { id, w, h }`. A pinned timeline photo shares its id with
-the clip, so a photo file is removed only when neither uses it (`forgetPhoto()` in `brewView`).
+`datetime-local` value) and `pumpClip: { id, w, h }`. A recipe also has `pumpClip`, stored as
+`x_pump_clip`. `setRecipeClip()` gives every version of the recipe the same clip. A brew without
+a clip shows its recipe's clip (`clipOf()`), and the recipe snapshot in a brew holds no clip.
+Several documents can use one photo id, so `dropPhoto()` removes a file only when no recipe and
+no brew uses it.
 `notesToTimeline()` moves the dated notes of older Brewfather imports into the timeline.
 
 ### Hydrometer devices

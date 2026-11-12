@@ -183,9 +183,16 @@ a picture or choose one from the gallery. A photo gets the time of its file, and
 change the time. Press **Add note** for a note without a photo. Tap a photo to see it
 full size.
 
-A pump clip is the badge for the beer. It shows at the top of the brew log and on the brew
-list in place of the pint. Press **Add pump clip** to upload one, or press **Pin as the pump
-clip** under a timeline photo.
+A pump clip is the badge for the beer. It shows at the top of the page and in the lists, in
+place of the pint. A recipe and a brew log can each have one.
+
+- **On a recipe**: press **Add pump clip** under the recipe status. Every version of the
+  recipe gets the same clip. Each brew of the recipe shows it, unless the brew has its own.
+- **On a brew log**: press **Add pump clip** in the Timeline card, or press **Pin as the pump
+  clip** under a timeline photo. Press **Use this pump clip for the recipe too** to give the
+  recipe the same clip.
+
+A recipe file that you export does not contain the picture.
 
 Gyle makes each photo smaller before it keeps it, to at most 1600 pixels on the long side.
 A photo is usually 150 to 400 kB. The photos are kept in the browser and saved with the brew:
