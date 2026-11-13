@@ -401,10 +401,11 @@ input[type="checkbox"] { width: 22px; height: 22px; flex: 0 0 22px; accent-color
 .list-tools .fld.search { flex: 1 1 120px; } .list-tools .fld.search.w-name { flex: 3 1 170px; }
 
 /* ---- recipe status ---- */
-.segs.status { margin-top: 12px; }
-.segs.status .seg { padding: 8px 11px 7px; font-size: 11px; }
-.segs.status .seg.on[data-v="ready"] { background: var(--ok); border-color: var(--ok); }
-.segs.status .seg.on[data-v="planning"] { background: var(--muted); border-color: var(--muted); }
+/* The status of a recipe, on its own page: the rubber stamp, as a button that opens a menu. */
+.status-line { margin-top: 14px; }
+.pill.status-stamp { display: inline-flex; align-items: center; gap: 7px; padding: 8px 10px 7px; font-size: 12.5px; background: transparent; cursor: pointer; }
+.pill.status-stamp svg { flex: none; opacity: .75; }
+.pill.status-stamp:active { transform: rotate(-3deg) translateY(1px); }
 .list-tools .fld.search { flex: 1 1 120px; }
 
 /* ---- compact ingredient rows ---- */

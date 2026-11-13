@@ -955,7 +955,7 @@ function recipesView() {
     toast(`Archived ${ids.length} recipe${ids.length > 1 ? 's' : ''}. Show → Archived lists them.`);
   };
   const grip = (name, i, id) => `<button type="button" class="grip" data-qid="${esc(id)}" aria-label="Move ${esc(name)}, now number ${i + 1} in the queue. Hold, then drag, or use the up and down arrow keys."><b>${i + 1}</b><svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true"><g fill="currentColor"><circle cx="2" cy="2" r="1.6"/><circle cx="8" cy="2" r="1.6"/><circle cx="2" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="2" cy="14" r="1.6"/><circle cx="8" cy="14" r="1.6"/></g></svg></button>`;
-  function row({ id, data, dirty }, i, canDrag, nextId) {
+  function row({ id, data, dirty }, i, canDrag, nextId, stamp) {
     const s = C.recipeStats(data, equipFor(data)), [pillCls, pillText] = STATUS_PILL[statusOf(data)];
     const archived = statusOf(data) === 'archived';
     return `<div class="q-row${archived ? ' archived' : ''}">
@@ -963,7 +963,7 @@ function recipesView() {
       <a class="item" href="#recipe/${id}">
       ${data.pumpClip ? clipThumb(data.pumpClip) : pint(C.srmToHex(s.srm), 34)}
       <span class="item-main">${id === nextId ? '<span class="next-tag">Next brew</span>' : ''}<strong>${esc(data.name)}</strong><small>${versionOf(data) > 1 ? `v${versionOf(data)} · ` : ''}${esc(data.style || 'No style')} · ${n(data.batchSize, 0)} L${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small></span>
-      <span class="pill ${pillCls}">${pillText}</span>
+      ${stamp ? `<span class="pill ${pillCls}">${pillText}</span>` : ''}
       <span class="item-stats"><span><b>${sg(s.og)}</b> OG</span><span><b>${n(s.ibu, 0)}</b> IBU</span><span class="pct"><b>${n(s.abv)}</b>%</span></span>
       </a>${archived ? `<button type="button" class="btn small restore" data-act="restore" data-id="${id}" aria-label="Bring ${esc(data.name)} back to the brew queue">Restore</button>` : ''}</div>`;
   }
@@ -997,8 +997,9 @@ function recipesView() {
         : `<div class="empty-state"><h2>No recipes yet</h2><p>Start a new recipe, or import BeerXML or BeerJSON files exported from BeerSmith or Brewfather, or a Brewfather backup.${store.connected ? '' : ' Choose where to keep them in Settings.'}</p></div>`}</div>`;
       return;
     }
-    if (recipeSort !== 'queue') { $('#recipe-list').innerHTML = `<div class="list">${shown.map(x => row(x, 0, false, nextId)).join('')}</div>`; return; }
-    // The queue, one group per status. Ready and planning groups can be reordered on their own
+    if (recipeSort !== 'queue') { $('#recipe-list').innerHTML = `<div class="list">${shown.map(x => row(x, 0, false, nextId, true)).join('')}</div>`; return; }
+    // The queue, one group per status. The group heading says the status, so the rows carry no stamp.
+    // Ready and planning groups can be reordered on their own
     // when there is no search (a search hides rows, and a drag must see the whole group).
     const groups = [['ready', 'Ready to brew'], ['planning', 'In planning'], ['archived', 'Archived']]
       .map(([st, title]) => ({ st, title, items: shown.filter(x => statusOf(x.data) === st) })).filter(g => g.items.length);
@@ -1200,10 +1201,26 @@ function recipeView(id) {
         }));
       },
       brew() { location.hash = '#brew/' + newBrew(id, r); },
+      // The status stamp under the name: a press opens this menu.
+      'status-menu'() {
+        const now = statusOf(r);
+        const choices = [['planning', 'In planning', 'after the ready ones'], ['ready', 'Ready to brew', 'first in the queue'], ['archived', 'Archived', 'out of the queue']];
+        sheetDialog(`<div class="sec-head"><h2>Recipe status</h2><button type="button" class="icon-btn" data-x aria-label="Close">×</button></div>
+          <div class="picks">${choices.map(([v, name, about]) => `<button type="button" class="pick${v === now ? ' on' : ''}" data-v="${v}" aria-pressed="${v === now}"><span>${name}</span><small>${about}</small></button>`).join('')}</div>`,
+        () => {}, dlg => {
+          dlg.querySelector('.pick.on')?.focus();
+          dlg.addEventListener('click', e => {
+            const v = e.target.closest('[data-v]')?.dataset.v;
+            if (!v) return;
+            dlg.close();
+            if (v !== now) ctx.actions.status({ dataset: { v } });
+          });
+        });
+      },
       status(btn) {
         const was = statusOf(r);
         setStatus(id, btn.dataset.v); update();
-        if (btn.dataset.v === 'archived') toast('Archived. It is out of the brew queue. Choose In planning or Ready to brew to bring it back.');
+        if (btn.dataset.v === 'archived') toast('Archived. It is out of the brew queue. Press the Archived stamp to bring it back.');
         else if (was === 'archived') toast('Back in the brew queue, at the bottom.');
       },
       'add-ferm': () => fermentableDialog(r, null, () => { ctx.touch(); renderList('fermentables'); update(); }),
@@ -1277,7 +1294,7 @@ function recipeView(id) {
         <label class="title-fld" for="f-name"><span class="sr">Recipe name</span><input id="f-name" class="title-input" value="${esc(r.name)}" aria-describedby="name-err"></label>
         <p class="name-err" id="name-err" role="status"></p>
         ${versionBar(id, r)}
-        <div class="segs status" id="status-toggle" role="group" aria-label="Recipe status"></div>
+        <div class="status-line" id="status-toggle"></div>
         <div class="clip-links" id="clip-links"></div></div>
       <div class="label-art" id="hero-art"></div>
     </section>
@@ -1337,8 +1354,8 @@ function recipeView(id) {
     const st = findStyle(r.style);
     $('#hero-over').textContent = `${r.style || 'No style set'} · ${n(+r.batchSize, 0)} L`;
     const status = statusOf(r);
-    $('#status-toggle').innerHTML = [['planning', 'In planning'], ['ready', 'Ready to brew'], ['archived', 'Archived']].map(([v, t]) =>
-      `<button type="button" class="seg${v === status ? ' on' : ''}" data-act="status" data-v="${v}" aria-pressed="${v === status}">${t}</button>`).join('');
+    const [stampCls, stampText] = STATUS_PILL[status];
+    $('#status-toggle').innerHTML = `<button type="button" class="pill status-stamp ${stampCls}" data-act="status-menu" aria-haspopup="dialog" aria-label="Status: ${stampText}. Press to change it">${stampText}<svg viewBox="0 0 10 6" width="9" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
     const art = $('#hero-art'), clip = r.pumpClip;
     if (!clip) art.innerHTML = pint(C.srmToHex(s.srm), 84, 1, !poured) + `<span class="stamp"><b>${n(s.abv)}</b>% ABV</span>`;
     if ((clip?.id || '') !== (art.dataset.clip ?? '-')) { // only when the clip changes, so typing does not make the picture blink

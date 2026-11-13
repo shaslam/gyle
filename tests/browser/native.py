@@ -114,6 +114,16 @@ with sync_playwright() as p:
     print('  queue, a hold that is too short: row picked up', lifted, '| order', names()[:2])
     pg.evaluate('scrollTo(0, 0)'); pg.wait_for_timeout(200)
 
+    # The status of a recipe: no stamp on the cards of the queue (the group heading says it), a stamp on
+    # the recipe page, and a press on that stamp opens a menu.
+    print('  status: stamps on the queue cards', pg.locator('#recipe-list .pill').count(), '| groups', pg.eval_on_selector_all('#recipe-list .q-head','o=>o.map(x=>x.textContent)'))
+    pg.goto(U+'#recipe/demo-kolsch'); pg.wait_for_timeout(500); pg.click('[data-act=status-menu]'); pg.wait_for_timeout(300)
+    print('  recipe page: stamp', repr(pg.inner_text('#status-toggle')), '| menu', pg.eval_on_selector_all('dialog.sheet .pick', "o=>o.map(x=>x.querySelector('span').textContent+(x.classList.contains('on')?'*':''))"))
+    pg.click('dialog.sheet .pick[data-v=ready]'); pg.wait_for_timeout(400)
+    print('  chosen: stamp', repr(pg.inner_text('#status-toggle')), '| menu gone', pg.locator('dialog.sheet').count()==0); pg.goto(U+'#recipes'); pg.wait_for_timeout(400)
+    print('  queue now:', pg.eval_on_selector_all('#recipe-list [data-group=ready] strong','o=>o.map(x=>x.textContent)')); pg.select_option('#sort', 'name'); pg.wait_for_timeout(300)
+    print('  a list in name order keeps its stamps:', pg.eval_on_selector_all('#recipe-list .pill','o=>o.map(x=>x.textContent)')); pg.select_option('#sort', 'queue'); pg.wait_for_timeout(300)
+
     # From the demo to an account: the strip leads to the welcome screen. Signing in removes the demo.
     pg.click('#demo-bar'); pg.wait_for_timeout(300)
     print('3 from the demo strip:', cards(), '|', pg.eval_on_selector_all('#welcome-demo button','o=>o.map(x=>x.textContent)'))
