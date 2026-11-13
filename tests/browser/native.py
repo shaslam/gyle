@@ -56,7 +56,7 @@ with sync_playwright() as p:
     web = b.new_page(viewport={'width':390,'height':844}); web.route('**/js/config.js', config); web.route(SB+'/**', sb)
     web.goto(U+'#settings/storage'); web.wait_for_timeout(900)
     print('0 browser: modes', web.eval_on_selector_all('#storage .seg','o=>o.map(x=>x.textContent)'), '| chip:', web.inner_text('#sync-chip'))
-    web.goto(U+'#recipes'); web.wait_for_timeout(400); web.focus('#show'); web.keyboard.press('Enter'); web.wait_for_timeout(200)
+    web.goto(U+'#recipe/house-pale-ale'); web.wait_for_timeout(600); web.focus('#f-equipment'); web.keyboard.press('Enter'); web.wait_for_timeout(200)
     print('  a dropdown keeps the browser list: Gyle popups', web.locator('dialog.choose').count()); web.close()
 
     pg = b.new_page(viewport={'width':390,'height':844}, device_scale_factor=2, has_touch=True)
@@ -89,13 +89,21 @@ with sync_playwright() as p:
     pg.reload(); pg.wait_for_timeout(900); pg.goto(U+'#recipes'); pg.wait_for_timeout(300); print('  after a restart: still the demo', len(names()), repr(chip()))
 
     # A dropdown opens Gyle's own popup, and a choice there reaches the page as a normal change.
-    pg.click('#show'); pg.wait_for_timeout(200)
+    pg.goto(U+'#brews'); pg.wait_for_timeout(400); pg.click('#view .list .item >> nth=1'); pg.wait_for_timeout(600); pg.click('#f-status'); pg.wait_for_timeout(200)
     print('  dropdown:', pg.inner_text('dialog.choose h2'), pg.eval_on_selector_all('dialog.choose .pick', "o=>o.map(x=>x.textContent+(x.classList.contains('on')?'*':''))"))
-    pg.click('dialog.choose .pick >> text=In planning'); pg.wait_for_timeout(300)
-    print('  chosen:', pg.eval_on_selector('#show', 'e=>e.selectedOptions[0].text'), '| popup gone:', pg.locator('dialog.choose').count()==0, '| list now:', names())
-    pg.click('#show'); pg.click('dialog.choose .pick >> text=Ready and planning'); pg.wait_for_timeout(300)
-    pg.click('#sort'); pg.wait_for_timeout(200); pg.mouse.click(5, 5); pg.wait_for_timeout(200)
-    print('  tap outside closes it:', pg.locator('dialog.choose').count()==0, '| unchanged:', pg.eval_on_selector('#sort', 'e=>e.selectedOptions[0].text'))
+    pg.click('dialog.choose .pick >> text=conditioning'); pg.wait_for_timeout(300)
+    print('  chosen:', pg.eval_on_selector('#f-status', 'e=>e.value'), '| popup gone:', pg.locator('dialog.choose').count()==0, '| in the brew log:', pg.evaluate("Object.values(JSON.parse(localStorage.getItem('gyle.cache.v1')).brews).map(b => b.data.status).join()"))
+    pg.click('#f-status'); pg.wait_for_timeout(200); pg.mouse.click(5, 5); pg.wait_for_timeout(200)
+    print('  tap outside closes it:', pg.locator('dialog.choose').count()==0, '| unchanged:', pg.eval_on_selector('#f-status', 'e=>e.value'))
+
+    # The Recipes page: three icon tools in place of fields, and no "Next brew" tag on a card.
+    pg.goto(U+'#recipes'); pg.wait_for_timeout(400)
+    print('  recipes tools:', pg.eval_on_selector_all('.tool-btn', "o=>o.map(x=>x.getAttribute('aria-label'))"), '| dropdowns', pg.locator('#view select').count(), '| search field shown', pg.is_visible('#q'), '| next-brew tags', pg.locator('.next-tag').count())
+    pg.click('[data-act=filter]'); pg.wait_for_timeout(200); print('  show menu:', pg.eval_on_selector_all('dialog.sheet .pick', "o=>o.map(x=>x.innerText.replace('\\n',' ')+(x.classList.contains('on')?'*':''))"))
+    pg.click('dialog.sheet .pick[data-v=planning]'); pg.wait_for_timeout(300); print('  in planning:', names(), '| note:', pg.inner_text('#tools-note'), '| tool marked', pg.eval_on_selector('[data-act=filter]', "e=>e.classList.contains('on')"))
+    pg.click('[data-act=filter]'); pg.click('dialog.sheet .pick[data-v=queue]'); pg.wait_for_timeout(300)
+    pg.click('[data-act=find]'); pg.wait_for_timeout(200); pg.keyboard.type('stout'); pg.wait_for_timeout(300); print('  search:', names(), '| cursor in the field', pg.evaluate("document.activeElement.id === 'q'"))
+    pg.click('[data-act=find]'); pg.wait_for_timeout(300); print('  search closed:', len(names()), 'recipes | field shown', pg.is_visible('#q'))
 
     # The brew queue. A finger that starts on a handle and moves at once scrolls the page.
     # A finger that holds the handle first picks the recipe up, and a drag then moves it.
@@ -106,13 +114,21 @@ with sync_playwright() as p:
         finger('touchStart', x, y); pg.wait_for_timeout(hold)
         for i in range(1, 13): finger('touchMove', x, y + dy*i/12); pg.wait_for_timeout(16)
         lifted = pg.locator('.q-row.dragging').count(); finger('touchEnd'); pg.wait_for_timeout(500); return lifted
+    pg.set_viewport_size({'width':390,'height':560}); pg.wait_for_timeout(200) # short, so the page can scroll
     lifted = drag('.grip >> nth=0', -220, 0)
-    print('  queue, a swipe that starts on a handle: row picked up', lifted, '| page scrolled', pg.evaluate('scrollY') > 100, '| order', names()[:2])
+    print('  queue, a swipe that starts on a handle: row picked up', lifted, '| page scrolled by', pg.evaluate('Math.round(scrollY)'), 'of', pg.evaluate('document.documentElement.scrollHeight - innerHeight'), '| order', names()[:2])
     pg.evaluate('scrollTo(0, 0)'); pg.wait_for_timeout(200); lifted = drag('.grip >> nth=0', 150, 450)
     print('  queue, hold then drag: row picked up', lifted, '| page scrolled', pg.evaluate('scrollY') > 0, '| order', names()[:2])
     pg.evaluate('scrollTo(0, 0)'); pg.wait_for_timeout(200); lifted = drag('.grip >> nth=0', 150, 120)
     print('  queue, a hold that is too short: row picked up', lifted, '| order', names()[:2])
     pg.evaluate('scrollTo(0, 0)'); pg.wait_for_timeout(200)
+    pg.set_viewport_size({'width':390,'height':844}); pg.wait_for_timeout(200)
+    # Press and hold a recipe: a menu opens and stays open when the finger lifts. The page does not follow the link.
+    box = pg.locator('a.item >> nth=1').bounding_box(); finger('touchStart', box['x'] + 150, box['y'] + 20); pg.wait_for_timeout(800)
+    held = pg.locator('dialog.sheet').count(); finger('touchEnd'); pg.wait_for_timeout(600)
+    print('  hold a recipe: menu while held', held, '| after the lift', pg.locator('dialog.sheet').count(), '| still on', pg.url.split('#')[1], '|', pg.inner_text('dialog.sheet h2'), pg.eval_on_selector_all('dialog.sheet .pick span', 'o=>o.map(x=>x.textContent)'))
+    pg.click('dialog.sheet .pick[data-v=planning]'); pg.wait_for_timeout(400); print('  moved from the menu:', pg.inner_text('#toast'), '| ready group', pg.eval_on_selector_all('#recipe-list [data-group=ready] strong','o=>o.map(x=>x.textContent)'))
+    pg.click('a.item >> nth=0', button='right'); pg.wait_for_timeout(300); print('  right mouse button: menu', pg.locator('dialog.sheet').count()); pg.click('dialog.sheet [data-x]'); pg.wait_for_timeout(200)
 
     # The status of a recipe: no stamp on the cards of the queue (the group heading says it), a stamp on
     # the recipe page, and a press on that stamp opens a menu.
@@ -121,8 +137,8 @@ with sync_playwright() as p:
     print('  recipe page: stamp', repr(pg.inner_text('#status-toggle')), '| menu', pg.eval_on_selector_all('dialog.sheet .pick', "o=>o.map(x=>x.querySelector('span').textContent+(x.classList.contains('on')?'*':''))"))
     pg.click('dialog.sheet .pick[data-v=ready]'); pg.wait_for_timeout(400)
     print('  chosen: stamp', repr(pg.inner_text('#status-toggle')), '| menu gone', pg.locator('dialog.sheet').count()==0); pg.goto(U+'#recipes'); pg.wait_for_timeout(400)
-    print('  queue now:', pg.eval_on_selector_all('#recipe-list [data-group=ready] strong','o=>o.map(x=>x.textContent)')); pg.select_option('#sort', 'name'); pg.wait_for_timeout(300)
-    print('  a list in name order keeps its stamps:', pg.eval_on_selector_all('#recipe-list .pill','o=>o.map(x=>x.textContent)')); pg.select_option('#sort', 'queue'); pg.wait_for_timeout(300)
+    print('  queue now:', pg.eval_on_selector_all('#recipe-list [data-group=ready] strong','o=>o.map(x=>x.textContent)')); pg.click('[data-act=order]'); pg.click('dialog.sheet .pick[data-v=name]'); pg.wait_for_timeout(300)
+    print('  a list in name order keeps its stamps:', pg.eval_on_selector_all('#recipe-list .pill','o=>o.map(x=>x.textContent)')); pg.click('[data-act=order]'); pg.click('dialog.sheet .pick[data-v=queue]'); pg.wait_for_timeout(300)
 
     # From the demo to an account: the strip leads to the welcome screen. Signing in removes the demo.
     pg.click('#demo-bar'); pg.wait_for_timeout(300)

@@ -189,6 +189,9 @@ const ICONS = {
   copy: '<rect x="9" y="9" width="11" height="11.5" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h3"/>',
   export: '<path d="M12 15V3.5M7.5 8 12 3.5 16.5 8M5 13.5v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/>',
   again: '<path d="M19.5 12a7.5 7.5 0 1 1-2.6-5.7M19.5 3.5v4h-4"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/>',
+  filter: '<path d="M4 5.5h16l-6.2 7.2v5.6l-3.6 1.7v-7.3z"/>',
+  order: '<path d="M8 5v14M4.5 15.5 8 19l3.5-3.5M16 19V5M12.5 8.5 16 5l3.5 3.5"/>',
   trash: '<path d="M4.5 7h15M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M6.5 7l.8 11.6a2 2 0 0 0 2 1.9h5.4a2 2 0 0 0 2-1.9L17.5 7M10 11v5.5M14 11v5.5"/>',
 };
 const icon = name => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
@@ -793,6 +796,61 @@ function sheetDialog(html, onSubmit, onOpen) {
   (onOpen || (d => d.querySelector('input')?.focus()))(dlg);
 }
 
+// Press and hold an item for a menu. `open(item)` runs after HOLD_MENU_MS with the finger still,
+// and also for the right mouse button. The lift of the finger after a hold must not count as a
+// tap, on the item or on the menu that now covers it, so that one click is swallowed.
+const HOLD_MENU_MS = 500;
+let swallowClick = false;
+document.addEventListener('click', e => { if (swallowClick) { e.stopPropagation(); e.preventDefault(); } }, true);
+function holdMenu(el, selector, open) {
+  let timer = 0, opened = 0;
+  const show = item => {
+    if (Date.now() - opened < 1000) return; // Android reports a long press itself too (contextmenu)
+    opened = Date.now();
+    swallowClick = true;
+    const free = () => setTimeout(() => { swallowClick = false; }, 350);
+    for (const kind of ['pointerup', 'pointercancel', 'touchend']) window.addEventListener(kind, free, { once: true, capture: true });
+    setTimeout(() => { swallowClick = false; }, 4000); // in case no such event arrives
+    try { navigator.vibrate?.(15); } catch { /* not allowed */ }
+    open(item);
+  };
+  el.addEventListener('pointerdown', e => {
+    const item = e.target.closest(selector);
+    clearTimeout(timer);
+    if (!item || e.pointerType === 'mouse') return; // a mouse has its right button
+    const stop = () => {
+      clearTimeout(timer);
+      for (const kind of ['pointermove', 'pointerup', 'pointercancel']) el.removeEventListener(kind, watch);
+    };
+    const watch = ev => { if (ev.type !== 'pointermove' || Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) > HOLD_SLOP) stop(); };
+    for (const kind of ['pointermove', 'pointerup', 'pointercancel']) el.addEventListener(kind, watch);
+    timer = setTimeout(() => { stop(); show(item); }, HOLD_MENU_MS);
+  });
+  el.addEventListener('contextmenu', e => {
+    const item = e.target.closest(selector);
+    if (!item) return;
+    e.preventDefault();
+    clearTimeout(timer);
+    const mouse = e.pointerType === 'mouse' || e.button === 2;
+    show(item);
+    if (mouse) swallowClick = false; // a right click sends no click to swallow
+  });
+}
+// A popup with a heading and a list of choices: [{ v, name, about?, on? }]. `pick(v)` gets the choice.
+function menuDialog(title, choices, pick) {
+  sheetDialog(`<div class="sec-head"><h2>${esc(title)}</h2><button type="button" class="icon-btn" data-x aria-label="Close">×</button></div>
+    <div class="picks">${choices.map(c => `<button type="button" class="pick${c.on ? ' on' : ''}" data-v="${esc(c.v)}"${c.on === undefined ? '' : ` aria-pressed="${!!c.on}"`}><span>${esc(c.name)}</span>${c.about ? `<small>${esc(c.about)}</small>` : ''}</button>`).join('')}</div>`,
+  () => {}, dlg => {
+    (dlg.querySelector('.pick.on') || dlg.querySelector('.pick'))?.focus();
+    dlg.addEventListener('click', e => {
+      const v = e.target.closest('.pick')?.dataset.v;
+      if (v === undefined) return;
+      dlg.close();
+      pick(v);
+    });
+  });
+}
+
 // ---------- recipes list ----------
 // The brew queue: recipe ids in the order you plan to brew them, kept in settings.json
 // so one drag is one small commit. Ready recipes come first, then those in planning, then
@@ -916,37 +974,80 @@ function enableReorder(list, onMove) {
 const RECIPE_SORTS = [['queue', 'Brew queue'], ['recent', 'Recently edited'], ['name', 'Name']];
 const RECIPE_SHOWS = [['queue', 'Ready and planning'], ['ready', 'Ready to brew'], ['planning', 'In planning'], ['archived', 'Archived'], ['all', 'All recipes']];
 let recipeSort = 'queue', recipeShow = 'queue';
-const isReady = data => statusOf(data) === 'ready';
 const STATUS_PILL = { ready: ['s-finished', 'Ready'], planning: ['', 'Planning'], archived: ['s-archived', 'Archived'] };
 
 function recipesView() {
   let shown = []; // what is on screen, in order
   ctx = {
     q: ctx.q || '',
-    raw(t) {
-      if (t.id === 'q') { ctx.q = t.value; draw(); }
-      if (t.id === 'sort') { recipeSort = t.value; draw(); }
-      if (t.id === 'show') { recipeShow = t.value; draw(); }
-    },
+    raw(t) { if (t.id === 'q') { ctx.q = t.value; draw(); } },
     change(t) { if (t.id === 'import-file') importFiles(t.files); },
     actions: {
       new: () => newRecipeDialog(),
       import() { $('#import-file').click(); },
+      // The three tools under the heading: search, which recipes to show, and their order.
+      find() {
+        const box = $('#find');
+        if (box.hidden) { box.hidden = false; $('#q').focus(); }
+        else { box.hidden = true; $('#q').value = ''; if (ctx.q) { ctx.q = ''; draw(); } }
+        drawTools();
+      },
+      filter() {
+        const count = v => latestOnly(store.list('recipes')).filter(x => v === 'all' || (v === 'queue' ? statusOf(x.data) !== 'archived' : statusOf(x.data) === v)).length;
+        menuDialog('Show', RECIPE_SHOWS.map(([v, name]) => ({ v, name, about: String(count(v)), on: v === recipeShow })), v => { recipeShow = v; draw(); });
+      },
+      order() {
+        menuDialog('Order', RECIPE_SORTS.map(([v, name]) => ({ v, name, on: v === recipeSort })), v => { recipeSort = v; draw(); });
+      },
     },
   };
+  const tool = (act, name) => `<button type="button" class="tool-btn" data-act="${act}">${icon(name)}</button>`;
   view.innerHTML = `
     <div class="page-head"><h1>Recipes</h1>
       <div class="actions"><button type="button" class="btn" data-act="import">Import</button><button type="button" class="btn primary" data-act="new">New recipe</button></div>
     </div>
     <input type="file" id="import-file" accept=".xml,.beerxml,.json,.zip,application/json,text/xml,application/zip" multiple hidden>
-    <div class="row list-tools">
-      <label class="fld search w-name" for="q"><span>Search by name or style</span><input id="q" type="search" value="${esc(ctx.q)}"></label>
-      <label class="fld search" for="sort"><span>Order</span><select id="sort">${RECIPE_SORTS.map(([v, t]) => `<option value="${v}"${v === recipeSort ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
-      <label class="fld search" for="show"><span>Show</span><select id="show">${RECIPE_SHOWS.map(([v, t]) => `<option value="${v}"${v === recipeShow ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+    <div class="list-tools">
+      ${tool('find', 'search')}${tool('filter', 'filter')}${tool('order', 'order')}
+      <label class="find" id="find" for="q"${ctx.q ? '' : ' hidden'}><span class="sr">Search by name or style</span><input id="q" type="search" placeholder="Name or style" value="${esc(ctx.q)}"></label>
+      <span class="tools-note" id="tools-note"></span>
     </div>
     <p class="hint on-wall" id="queue-hint"></p>
     <div id="bulk" class="foot-actions on-wall"></div>
     <div id="recipe-list"></div>`;
+  // A tool that is not at its usual setting is marked, and the note beside the tools says what is set.
+  function drawTools() {
+    const label = (list, v) => list.find(([k]) => k === v)[1];
+    const set = (act, on, words) => { const b = $(`.tool-btn[data-act=${act}]`); b.classList.toggle('on', on); b.setAttribute('aria-label', words); b.title = words; };
+    const finding = !$('#find').hidden;
+    set('find', finding, finding ? 'Close the search' : 'Search by name or style');
+    $('.tool-btn[data-act=find]').setAttribute('aria-expanded', finding);
+    set('filter', recipeShow !== 'queue', `Show: ${label(RECIPE_SHOWS, recipeShow)}. Press to change`);
+    set('order', recipeSort !== 'queue', `Order: ${label(RECIPE_SORTS, recipeSort)}. Press to change`);
+    $('#tools-note').textContent = [recipeShow !== 'queue' ? label(RECIPE_SHOWS, recipeShow) : '', recipeSort !== 'queue' ? `by ${label(RECIPE_SORTS, recipeSort).toLowerCase()}` : ''].filter(Boolean).join(', ');
+  }
+  // Press and hold a recipe (or right-click it) for the things people do most with one.
+  holdMenu($('#recipe-list'), 'a.item', a => {
+    const id = a.getAttribute('href').split('/')[1], r = store.get('recipes', id);
+    if (!r) return;
+    const st = statusOf(r);
+    menuDialog(vName(r), [
+      { v: 'brew', name: 'Brew this recipe', about: 'start a brew log' },
+      { v: 'open', name: 'Open the recipe' },
+      { v: 'sheet', name: 'Brew sheet' },
+      ...(st === 'ready' ? [] : [{ v: 'ready', name: 'Mark as ready to brew' }]),
+      ...(st === 'planning' ? [] : [{ v: 'planning', name: st === 'archived' ? 'Restore to planning' : 'Move back to planning' }]),
+      ...(st === 'archived' ? [] : [{ v: 'archived', name: 'Archive', about: 'out of the queue' }]),
+    ], v => {
+      if (v === 'brew') location.hash = '#brew/' + newBrew(id, r);
+      else if (v === 'open') location.hash = '#recipe/' + id;
+      else if (v === 'sheet') location.hash = '#sheet/' + id;
+      else {
+        setStatus(id, v);
+        toast(v === 'archived' ? `Archived ${r.name}. Show → Archived lists it.` : v === 'ready' ? `${r.name} is ready to brew, at the bottom of that group.` : `${r.name} is in planning, at the bottom of that group.`);
+      }
+    });
+  });
   ctx.actions.restore = btn => { setStatus(btn.dataset.id, 'planning'); toast('Back in the brew queue, at the bottom.'); };
   ctx.actions['archive-shown'] = btn => {
     const ids = shown.filter(x => statusOf(x.data) !== 'archived').map(x => x.id);
@@ -955,19 +1056,20 @@ function recipesView() {
     toast(`Archived ${ids.length} recipe${ids.length > 1 ? 's' : ''}. Show → Archived lists them.`);
   };
   const grip = (name, i, id) => `<button type="button" class="grip" data-qid="${esc(id)}" aria-label="Move ${esc(name)}, now number ${i + 1} in the queue. Hold, then drag, or use the up and down arrow keys."><b>${i + 1}</b><svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true"><g fill="currentColor"><circle cx="2" cy="2" r="1.6"/><circle cx="8" cy="2" r="1.6"/><circle cx="2" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="2" cy="14" r="1.6"/><circle cx="8" cy="14" r="1.6"/></g></svg></button>`;
-  function row({ id, data, dirty }, i, canDrag, nextId, stamp) {
+  function row({ id, data, dirty }, i, canDrag, stamp) {
     const s = C.recipeStats(data, equipFor(data)), [pillCls, pillText] = STATUS_PILL[statusOf(data)];
     const archived = statusOf(data) === 'archived';
     return `<div class="q-row${archived ? ' archived' : ''}">
       ${canDrag ? grip(data.name, i, id) : ''}
       <a class="item" href="#recipe/${id}">
       ${data.pumpClip ? clipThumb(data.pumpClip) : pint(C.srmToHex(s.srm), 34)}
-      <span class="item-main">${id === nextId ? '<span class="next-tag">Next brew</span>' : ''}<strong>${esc(data.name)}</strong><small>${versionOf(data) > 1 ? `v${versionOf(data)} · ` : ''}${esc(data.style || 'No style')} · ${n(data.batchSize, 0)} L${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small></span>
+      <span class="item-main"><strong>${esc(data.name)}</strong><small>${versionOf(data) > 1 ? `v${versionOf(data)} · ` : ''}${esc(data.style || 'No style')} · ${n(data.batchSize, 0)} L${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small></span>
       ${stamp ? `<span class="pill ${pillCls}">${pillText}</span>` : ''}
       <span class="item-stats"><span><b>${sg(s.og)}</b> OG</span><span><b>${n(s.ibu, 0)}</b> IBU</span><span class="pct"><b>${n(s.abv)}</b>%</span></span>
       </a>${archived ? `<button type="button" class="btn small restore" data-act="restore" data-id="${id}" aria-label="Bring ${esc(data.name)} back to the brew queue">Restore</button>` : ''}</div>`;
   }
   function draw() {
+    drawTools();
     drawRows();
     loadPhotos($('#recipe-list')); // pump clips in place of pints
   }
@@ -981,13 +1083,11 @@ function recipesView() {
     shown = sorted.filter(({ data }) => (!q || `${data.name} ${data.style}`.toLowerCase().includes(q)) && want(statusOf(data)));
     const inQueue = queued(all).filter(x => statusOf(x.data) !== 'archived');
     const place = new Map(inQueue.map((x, i) => [x.id, i])); // queue numbers stay the same whatever is shown
-    const nextId = inQueue.find(x => isReady(x.data))?.id; // the first ready recipe in the queue is the next brew
-    const archivedHidden = recipeShow !== 'all' && recipeShow !== 'archived' ? all.filter(x => statusOf(x.data) === 'archived').length : 0;
     const showsQueue = recipeShow !== 'archived' && shown.some(x => statusOf(x.data) !== 'archived');
+    // Only the two cases where the page does something that needs a word of explanation.
     $('#queue-hint').textContent = recipeSort !== 'queue' || !all.length ? ''
       : q ? (showsQueue ? 'Clear the search to reorder the queue.' : '')
-      : recipeShow === 'archived' ? 'Archived recipes are out of the brew queue. Restore one to put it back at the bottom.'
-      : showsQueue ? `Your brew queue: ready recipes first, then those in planning. Hold a handle and drag it to reorder within a group. ${nextId ? 'The first ready recipe is next.' : 'Nothing is flagged ready to brew yet.'}${archivedHidden ? ` ${archivedHidden} archived recipe${archivedHidden > 1 ? 's are' : ' is'} not shown.` : ''}` : '';
+      : recipeShow === 'archived' ? 'Archived recipes are out of the brew queue. Restore one to put it back at the bottom.' : '';
     // Archiving many at once: filter the list by status or a search first.
     const archivable = shown.filter(x => statusOf(x.data) !== 'archived').length;
     $('#bulk').innerHTML = archivable > 1 && (q || recipeShow === 'planning' || recipeShow === 'ready')
@@ -997,14 +1097,14 @@ function recipesView() {
         : `<div class="empty-state"><h2>No recipes yet</h2><p>Start a new recipe, or import BeerXML or BeerJSON files exported from BeerSmith or Brewfather, or a Brewfather backup.${store.connected ? '' : ' Choose where to keep them in Settings.'}</p></div>`}</div>`;
       return;
     }
-    if (recipeSort !== 'queue') { $('#recipe-list').innerHTML = `<div class="list">${shown.map(x => row(x, 0, false, nextId, true)).join('')}</div>`; return; }
+    if (recipeSort !== 'queue') { $('#recipe-list').innerHTML = `<div class="list">${shown.map(x => row(x, 0, false, true)).join('')}</div>`; return; }
     // The queue, one group per status. The group heading says the status, so the rows carry no stamp.
     // Ready and planning groups can be reordered on their own
     // when there is no search (a search hides rows, and a drag must see the whole group).
     const groups = [['ready', 'Ready to brew'], ['planning', 'In planning'], ['archived', 'Archived']]
       .map(([st, title]) => ({ st, title, items: shown.filter(x => statusOf(x.data) === st) })).filter(g => g.items.length);
     const drag = g => !q && g.st !== 'archived' && g.items.length > 1;
-    $('#recipe-list').innerHTML = groups.map(g => `<h2 class="q-head on-wall">${g.title}</h2><div class="list" data-group="${g.st}">${g.items.map(x => row(x, place.get(x.id) ?? 0, drag(g), nextId)).join('')}</div>`).join('');
+    $('#recipe-list').innerHTML = groups.map(g => `<h2 class="q-head on-wall">${g.title}</h2><div class="list" data-group="${g.st}">${g.items.map(x => row(x, place.get(x.id) ?? 0, drag(g))).join('')}</div>`).join('');
     for (const g of groups.filter(drag)) {
       enableReorder($(`#recipe-list [data-group="${g.st}"]`), (from, to) => {
         const ids = g.items.map(x => x.id);

@@ -125,13 +125,19 @@ fields (`x_family`, `x_version`, `x_version_note`, `x_based_on`). Other software
 
 The recipe list is ordered as a brew queue by default: the top recipe is the one you plan
 to brew next. Drag a row by its numbered handle (or focus the handle and use the arrow
-keys) to reorder. The order is stored as `brewOrder` in `settings.json`. The Order menu
-switches the list to recently edited or by name.
+keys) to reorder. The order is stored as `brewOrder` in `settings.json`.
+
+Three icon buttons under the heading control the list. The magnifying glass opens a search
+field. The funnel chooses which recipes to show. The two arrows choose the order: brew
+queue, recently edited or name. A button turns gold when it is not at its usual setting.
+
+Press and hold a recipe, or click it with the right mouse button, for a short menu: brew
+it, open it, open its brew sheet, change its status or archive it.
 
 Each recipe is **In planning**, **Ready to brew** or **Archived**. The stamp under the
 recipe's name shows which. Press the stamp to change it. The file stores this as `x_status`. The queue lists ready recipes first,
 then recipes in planning. You can drag rows only inside their own group. The first ready
-recipe is tagged as the next brew. When a recipe changes status, it goes to the bottom of
+recipe is the next brew. When a recipe changes status, it goes to the bottom of
 its new group.
 
 Archived recipes are not in the queue or in the brew picker. To see them, set Show to

@@ -176,8 +176,6 @@ main > .foot-actions { padding: 4px 0 8px; }
 .fld > span { font: 700 11px/1.2 var(--font-body); font-stretch: 80%; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fld.w-name { flex: 3 1 210px; }
 .fld.block { margin-top: 12px; }
-.fld.search { flex: none; }
-.fld.search > span { color: var(--on-wall-muted); }
 .fld:has(input[type="date"]) { flex-basis: 150px; }
 input, select, textarea {
   width: 100%; min-width: 0; height: 40px; padding: 0 10px; color: var(--ink); background: var(--paper);
@@ -347,7 +345,6 @@ input[type="checkbox"] { width: 22px; height: 22px; flex: 0 0 22px; accent-color
   .sync.busy::before, .pour .beer, .pour .foam { animation: none; }
   #toast, .btn, .tile, .item { transition: none; }
 }
-.fld.search input { border-color: rgb(74 52 14 / .35); }
 
 /* ---- tool index and single-tool pages ---- */
 .tool-link { flex-wrap: nowrap; padding: 14px 16px; }
@@ -371,10 +368,25 @@ input[type="checkbox"] { width: 22px; height: 22px; flex: 0 0 22px; accent-color
 .tool .foot-actions { margin-top: 16px; }
 
 /* ---- brew queue: draggable recipe rows ---- */
-.list-tools { align-items: flex-end; }
+/* The tools under the Recipes heading: three icon buttons, the search field when it is open, and a
+   short note that says which filter or order is set. */
+.list-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: -4px; }
+.tool-btn {
+  flex: none; width: 40px; height: 38px; display: grid; place-items: center; padding: 0; cursor: pointer;
+  color: var(--ink); background: var(--paper); border: 1.5px solid var(--ink); border-radius: 8px; box-shadow: 0 2px 0 var(--ink);
+}
+.tool-btn:active { transform: translateY(2px); box-shadow: none; }
+.tool-btn.on { background: var(--gold); }
+.tool-btn .ico { width: 20px; height: 20px; }
+.find { flex: 1 1 150px; min-width: 0; }
+.find[hidden] { display: none; }
+.find input { width: 100%; height: 38px; border-color: rgb(74 52 14 / .35); }
+.tools-note { flex: 0 1 auto; min-width: 0; font-size: 13px; color: var(--on-wall-muted); }
+.tools-note:empty { display: none; }
+/* A press and hold on a recipe opens a menu, so it must not select text or open the phone's link menu. */
+.q-row .item { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .hint.on-wall { color: var(--on-wall-muted); margin: -6px 0 -4px; }
 .hint.on-wall:empty { display: none; }
-.fld.search select { border-color: rgb(74 52 14 / .35); }
 .q-row { display: flex; align-items: stretch; position: relative; transition: transform .16s; }
 .q-row .item { flex: 1; min-width: 0; }
 .q-row .grip + .item { border-radius: 0 14px 14px 0; }
@@ -389,7 +401,6 @@ input[type="checkbox"] { width: 22px; height: 22px; flex: 0 0 22px; accent-color
 .q-row.dragging { z-index: 4; transition: none; }
 .q-row.dragging .grip { cursor: grabbing; background: var(--gold-deep); }
 .q-row.dragging .item, .q-row.dragging .grip { box-shadow: 0 14px 26px rgb(40 26 4 / .4); }
-.next-tag { font: 800 11px/1 var(--font-body); font-stretch: 75%; letter-spacing: .16em; text-transform: uppercase; color: var(--red); }
 @media (prefers-reduced-motion: reduce) { .q-row { transition: none; } }
 #recipe-list { display: flex; flex-direction: column; gap: 10px; }
 .q-head { background: none; padding: 0; margin: 8px 0 -2px; font: 800 12px/1 var(--font-body); font-stretch: 75%; letter-spacing: .16em; text-transform: uppercase; color: var(--on-wall-muted); }
@@ -398,7 +409,6 @@ input[type="checkbox"] { width: 22px; height: 22px; flex: 0 0 22px; accent-color
 .q-row .restore { align-self: center; flex: 0 0 auto; margin-left: 8px; }
 #bulk:empty { display: none; }
 #bulk { margin: 0; }
-.list-tools .fld.search { flex: 1 1 120px; } .list-tools .fld.search.w-name { flex: 3 1 170px; }
 
 /* ---- recipe status ---- */
 /* The status of a recipe, on its own page: the rubber stamp, as a button that opens a menu. */
@@ -406,7 +416,6 @@ input[type="checkbox"] { width: 22px; height: 22px; flex: 0 0 22px; accent-color
 .pill.status-stamp { display: inline-flex; align-items: center; gap: 7px; padding: 8px 10px 7px; font-size: 12.5px; background: transparent; cursor: pointer; }
 .pill.status-stamp svg { flex: none; opacity: .75; }
 .pill.status-stamp:active { transform: rotate(-3deg) translateY(1px); }
-.list-tools .fld.search { flex: 1 1 120px; }
 
 /* ---- compact ingredient rows ---- */
 .row.compact { flex-wrap: nowrap; align-items: center; gap: 6px; }

@@ -139,7 +139,7 @@ console.log('  the demo: chip', await chip(), '| strip', await shown('#demo-bar'
 const gripAt = () => js("(r => [Math.round((r.x + r.width / 2) * devicePixelRatio), Math.round((r.y + r.height / 2) * devicePixelRatio)])(document.querySelector('.grip').getBoundingClientRect())");
 let [gx, gy] = await gripAt();
 sh(`input swipe ${gx} ${gy + top} ${gx} ${gy + top - 500} 250`); await sleep(1200);
-console.log('  queue, a swipe from a handle: page scrolled', await js('scrollY > 50'), '| first recipe', (await recipes()).split(',')[0]);
+console.log('  queue, a swipe from a handle: page scrolled by', await js('Math.round(scrollY)'), 'of', await js('document.documentElement.scrollHeight - innerHeight'), '| first recipe', (await recipes()).split(',')[0]);
 await js('scrollTo(0, 0)'); await sleep(500); [gx, gy] = await gripAt();
 sh(`input draganddrop ${gx} ${gy + top} ${gx} ${gy + top + Math.round(150 * await js('devicePixelRatio'))} 1500`); await sleep(1200);
 console.log('  queue, hold then drag: first recipe', (await recipes()).split(',')[0]);
@@ -189,11 +189,16 @@ console.log('  app opened again: page', await js('location.hash'), '| timer', aw
 await go('#tools'); sh('input keyevent BACK'); await sleep(900);
 console.log('6 Back: from #tools to', await js('location.hash'));
 // A dropdown shows Gyle's own popup, not Android's list. Back closes a popup and stays on the page.
-await go('#recipes'); await tap('#show'); await sleep(1200);
+await go(brew); await tap('#f-status'); await sleep(1200);
 console.log('  dropdown: Gyle popup', await js("!!document.querySelector('dialog.choose[open]')"), '| choices', await js("document.querySelectorAll('dialog.choose .pick').length"), '| app windows', windows());
-await tap('dialog.choose .pick[data-i="4"]'); await sleep(800);
-console.log('  chosen:', await js("document.querySelector('#show').selectedOptions[0].text"), '| popup gone:', await js("!document.querySelector('dialog.choose')"));
-await tap('#sort'); await sleep(1000); sh('input keyevent BACK'); await sleep(1000);
+await tap('dialog.choose .pick[data-i="2"]'); await sleep(800);
+console.log('  chosen:', await js("document.querySelector('#f-status').value"), '| popup gone:', await js("!document.querySelector('dialog.choose')"));
+await tap('#f-status'); await sleep(1000); sh('input keyevent BACK'); await sleep(1000);
+// Press and hold a recipe: a menu opens, and the page stays where it is.
+await go('#recipes'); const [hx, hy] = await js("(r => [Math.round((r.x + r.width / 2) * devicePixelRatio), Math.round((r.y + 30) * devicePixelRatio)])(document.querySelector('a.item').getBoundingClientRect())");
+sh(`input swipe ${hx} ${hy + top} ${hx} ${hy + top} 900`); await sleep(1000);
+console.log('  hold a recipe: menu', await js("[...document.querySelectorAll('dialog.sheet[open] .pick span')].map(x => x.textContent).join(' / ')"), '| still on', await js('location.hash'));
+sh('input keyevent BACK'); await sleep(800);
 console.log('  Back with a popup open: popup gone', await js("!document.querySelector('dialog[open]')"), '| still on', await js('location.hash'));
 await go(brew); await tap('input[type=date]'); await sleep(2000);
 console.log('  a date field opens Android\'s dialog: app windows', windows()); sh('input keyevent BACK'); await sleep(800);
@@ -226,7 +231,7 @@ console.log('  imported:', await js('location.hash'), '| toast', await text('#to
 // The keyboard, and Back on the first screen. In an emulator with a window, Google's keyboard can show
 // its stylus tutorial in place of the keys, and then the page height does not change.
 // The first keyboard after a start of the emulator can take some seconds to appear.
-await go('#recipes'); const tall = await js('innerHeight'); await tap('#q'); await until(async () => await js('innerHeight') < tall, 10000, 500);
+await go('#recipes'); const tall = await js('innerHeight'); await tap('[data-act=find]'); await until(async () => await js('innerHeight') < tall, 10000, 500);
 console.log('9 keyboard: page height', tall, '->', await js('innerHeight'), '| tab bar still on screen:', await js("document.querySelector('#tabs').getBoundingClientRect().bottom <= innerHeight + 1"));
 sh('input keyevent BACK'); await sleep(800);
 ws.close(); sh(`am force-stop ${PKG}`); start(); await attach(); await sleep(1000); ws.close();
