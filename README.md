@@ -383,9 +383,9 @@ view. It has every feature of the website, with these differences:
 
 The app needs iOS 16.4 or later.
 
-This app was written on a computer that cannot build iOS apps. The page's side passes its
-tests in WebKit, the engine that iOS uses. Nobody built the Swift code or ran the app on a
-phone yet, so expect some errors on the first build.
+This app was written on a computer that cannot build iOS apps. The Swift code compiles on
+GitHub (Xcode 26.6), and the page's side passes its tests in WebKit, the engine that iOS
+uses. Nobody ran the app on a simulator or a phone yet, so expect some faults on the first run.
 
 ### Build and install
 
@@ -411,8 +411,8 @@ and the example recipe into the app. The app does not change when the website ch
 After a change to the web files, build and install the app again.
 
 Without a Mac, you can still find out if the Swift code compiles. The workflow
-`.github/workflows/ios-build.yml` builds the app on GitHub for the iPhone simulator. It
-cannot put the app on a phone.
+`.github/workflows/ios-build.yml` builds the app on GitHub for the iPhone simulator after
+each push that changes a file under `ios/`. It cannot put the app on a phone.
 
 ### Sign-in links
 
