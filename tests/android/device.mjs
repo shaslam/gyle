@@ -135,6 +135,16 @@ console.log('1 app starts:', await text('#view h1'), '|', await cards(), '| tab 
 await tap('[data-act=demo]'); await sleep(1200);
 console.log('  the demo: chip', await chip(), '| strip', await shown('#demo-bar'), '| recipes', await recipes(), '| brews', await js("Object.keys(JSON.parse(localStorage.getItem('gyle.cache.v1')).brews).length"));
 
+// The brew queue. A swipe that starts on a handle scrolls the page. A long press, then a drag, moves the recipe.
+const gripAt = () => js("(r => [Math.round((r.x + r.width / 2) * devicePixelRatio), Math.round((r.y + r.height / 2) * devicePixelRatio)])(document.querySelector('.grip').getBoundingClientRect())");
+let [gx, gy] = await gripAt();
+sh(`input swipe ${gx} ${gy + top} ${gx} ${gy + top - 500} 250`); await sleep(1200);
+console.log('  queue, a swipe from a handle: page scrolled', await js('scrollY > 50'), '| first recipe', (await recipes()).split(',')[0]);
+await js('scrollTo(0, 0)'); await sleep(500); [gx, gy] = await gripAt();
+sh(`input draganddrop ${gx} ${gy + top} ${gx} ${gy + top + Math.round(150 * await js('devicePixelRatio'))} 1500`); await sleep(1200);
+console.log('  queue, hold then drag: first recipe', (await recipes()).split(',')[0]);
+await js('scrollTo(0, 0)'); await sleep(300);
+
 await tap('#demo-bar'); await sleep(800);
 console.log('2 from the demo strip:', await cards(), '| mode buttons', await js("document.querySelectorAll('#storage .seg').length"), '| GitHub fields', await js("document.querySelectorAll('#gh-repo').length"));
 await js("document.querySelector('#sb-email').value = 'stu@example.com'; document.querySelector('#sb-password').value = 'hunter22'");

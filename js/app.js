@@ -824,17 +824,46 @@ function saveQueue(ids) {
 }
 
 // Drag rows by their grip (pointer or touch), or move them with the arrow keys. onMove(from, to) gets list indexes.
+// A mouse drags at once. A finger must hold the grip still for HOLD_MS first, so a finger that
+// scrolls the page and happens to start on a grip does not move a recipe.
+const HOLD_MS = 300, HOLD_SLOP = 8; // how long to hold, and how far (px) the finger can move meanwhile
 function enableReorder(list, onMove) {
+  let dragging = false;
+  // A touch on a grip scrolls the page (touch-action: pan-y in the stylesheet). Once a drag has
+  // begun, this stops the scroll, and the pointer events below keep coming.
+  list.addEventListener('touchmove', e => { if (dragging) e.preventDefault(); }, { passive: false });
+  list.addEventListener('contextmenu', e => { if (e.target.closest('.grip')) e.preventDefault(); }); // a long press is ours
   list.addEventListener('pointerdown', e => {
     const grip = e.target.closest('.grip');
-    if (!grip || e.button > 0) return;
+    if (!grip || e.button > 0 || dragging) return;
+    if (e.pointerType === 'mouse') { e.preventDefault(); return void begin(grip, e); }
+    let last = e;
+    const stop = () => {
+      clearTimeout(timer);
+      for (const kind of ['pointermove', 'pointerup', 'pointercancel']) grip.removeEventListener(kind, watch);
+    };
+    // The finger moved or lifted before the time was up: a scroll or a tap, not a drag.
+    const watch = ev => {
+      if (ev.pointerId !== e.pointerId) return;
+      last = ev;
+      if (ev.type !== 'pointermove' || Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) > HOLD_SLOP) stop();
+    };
+    const timer = setTimeout(() => {
+      stop();
+      try { navigator.vibrate?.(15); } catch { /* not allowed */ } // a tick: the row is now in the hand
+      begin(grip, last);
+    }, HOLD_MS);
+    for (const kind of ['pointermove', 'pointerup', 'pointercancel']) grip.addEventListener(kind, watch);
+  });
+  function begin(grip, e) {
     const rows = [...list.querySelectorAll('.q-row')], row = grip.closest('.q-row'), from = rows.indexOf(row);
+    if (from < 0) return; // the list was drawn again during the hold
     const rects = rows.map(r => { const box = r.getBoundingClientRect(); return { top: box.top + scrollY, h: box.height }; });
     const step = rects[from].h + (rows.length > 1 ? rects[1].top - rects[0].top - rects[0].h : 0);
     const startY = e.pageY;
     let to = from, clientY = e.clientY, raf;
-    e.preventDefault();
-    grip.setPointerCapture(e.pointerId);
+    dragging = true;
+    try { grip.setPointerCapture(e.pointerId); } catch { /* the pointer is gone: `end` runs at the next event */ }
     row.classList.add('dragging');
     const place = pageY => {
       const dy = pageY - startY, centre = rects[from].top + rects[from].h / 2 + dy;
@@ -856,6 +885,7 @@ function enableReorder(list, onMove) {
       raf = requestAnimationFrame(edge);
     };
     const end = () => {
+      dragging = false;
       cancelAnimationFrame(raf);
       grip.removeEventListener('pointermove', move);
       grip.removeEventListener('pointerup', end);
@@ -868,7 +898,7 @@ function enableReorder(list, onMove) {
     grip.addEventListener('pointerup', end);
     grip.addEventListener('pointercancel', end);
     raf = requestAnimationFrame(edge);
-  });
+  }
   list.addEventListener('keydown', e => {
     const grip = e.target.closest('.grip');
     if (!grip || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
@@ -924,7 +954,7 @@ function recipesView() {
     ids.forEach(x => setStatus(x, 'archived'));
     toast(`Archived ${ids.length} recipe${ids.length > 1 ? 's' : ''}. Show → Archived lists them.`);
   };
-  const grip = (name, i, id) => `<button type="button" class="grip" data-qid="${esc(id)}" aria-label="Move ${esc(name)}, now number ${i + 1} in the queue. Drag, or use the up and down arrow keys."><b>${i + 1}</b><svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true"><g fill="currentColor"><circle cx="2" cy="2" r="1.6"/><circle cx="8" cy="2" r="1.6"/><circle cx="2" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="2" cy="14" r="1.6"/><circle cx="8" cy="14" r="1.6"/></g></svg></button>`;
+  const grip = (name, i, id) => `<button type="button" class="grip" data-qid="${esc(id)}" aria-label="Move ${esc(name)}, now number ${i + 1} in the queue. Hold, then drag, or use the up and down arrow keys."><b>${i + 1}</b><svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true"><g fill="currentColor"><circle cx="2" cy="2" r="1.6"/><circle cx="8" cy="2" r="1.6"/><circle cx="2" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="2" cy="14" r="1.6"/><circle cx="8" cy="14" r="1.6"/></g></svg></button>`;
   function row({ id, data, dirty }, i, canDrag, nextId) {
     const s = C.recipeStats(data, equipFor(data)), [pillCls, pillText] = STATUS_PILL[statusOf(data)];
     const archived = statusOf(data) === 'archived';
@@ -934,7 +964,7 @@ function recipesView() {
       ${data.pumpClip ? clipThumb(data.pumpClip) : pint(C.srmToHex(s.srm), 34)}
       <span class="item-main">${id === nextId ? '<span class="next-tag">Next brew</span>' : ''}<strong>${esc(data.name)}</strong><small>${versionOf(data) > 1 ? `v${versionOf(data)} · ` : ''}${esc(data.style || 'No style')} · ${n(data.batchSize, 0)} L${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small></span>
       <span class="pill ${pillCls}">${pillText}</span>
-      <span class="item-stats"><span><b>${sg(s.og)}</b> OG</span><span><b>${n(s.ibu, 0)}</b> IBU</span><span><b>${n(s.abv)}</b> %</span></span>
+      <span class="item-stats"><span><b>${sg(s.og)}</b> OG</span><span><b>${n(s.ibu, 0)}</b> IBU</span><span class="pct"><b>${n(s.abv)}</b>%</span></span>
       </a>${archived ? `<button type="button" class="btn small restore" data-act="restore" data-id="${id}" aria-label="Bring ${esc(data.name)} back to the brew queue">Restore</button>` : ''}</div>`;
   }
   function draw() {
@@ -957,7 +987,7 @@ function recipesView() {
     $('#queue-hint').textContent = recipeSort !== 'queue' || !all.length ? ''
       : q ? (showsQueue ? 'Clear the search to reorder the queue.' : '')
       : recipeShow === 'archived' ? 'Archived recipes are out of the brew queue. Restore one to put it back at the bottom.'
-      : showsQueue ? `Your brew queue: ready recipes first, then those in planning. Drag a handle to reorder within a group. ${nextId ? 'The first ready recipe is next.' : 'Nothing is flagged ready to brew yet.'}${archivedHidden ? ` ${archivedHidden} archived recipe${archivedHidden > 1 ? 's are' : ' is'} not shown.` : ''}` : '';
+      : showsQueue ? `Your brew queue: ready recipes first, then those in planning. Hold a handle and drag it to reorder within a group. ${nextId ? 'The first ready recipe is next.' : 'Nothing is flagged ready to brew yet.'}${archivedHidden ? ` ${archivedHidden} archived recipe${archivedHidden > 1 ? 's are' : ' is'} not shown.` : ''}` : '';
     // Archiving many at once: filter the list by status or a search first.
     const archivable = shown.filter(x => statusOf(x.data) !== 'archived').length;
     $('#bulk').innerHTML = archivable > 1 && (q || recipeShow === 'planning' || recipeShow === 'ready')
@@ -1654,7 +1684,7 @@ function brewsView() {
         ${clipOf(b) ? clipThumb(clipOf(b)) : pint(hex, 34)}
         <span class="item-main"><strong>${esc(b.name)}</strong><small>${esc(b.brewDate || 'no date')}${dirty && store.connected ? ` · <em>${store.words.unsaved}</em>` : ''}</small>${ratingOf(b) ? ratingPints(ratingOf(b), hex) : ''}</span>
         <span class="pill s-${b.status.replace(' ', '-')}">${esc(b.status)}</span>
-        <span class="item-stats"><span><b>${sg(m.og)}</b> OG</span><span><b>${sg(fg)}</b> SG</span><span><b>${m.og && fg ? n(C.abv(m.og, fg)) : '–'}</b> %</span></span>
+        <span class="item-stats"><span><b>${sg(m.og)}</b> OG</span><span><b>${sg(fg)}</b> SG</span><span class="pct"><b>${m.og && fg ? n(C.abv(m.og, fg)) : '–'}</b>%</span></span>
       </a>`;
     }).join('') : `<div class="empty-state"><h2>No brews logged</h2><p>Open a recipe and press Brew this recipe. A brew log keeps a snapshot of the recipe, a brew-day checklist, your measurements and gravity readings.</p></div>`}</div>`;
   loadPhotos(view);
@@ -2719,30 +2749,72 @@ function drawDemoBar() {
   if (bar) bar.hidden = !(store.demo && !store.connected) || routeKey === 'welcome/';
 }
 
+// The sync light in the header. When there is nothing to say it is only a dot: green in sync,
+// flashing gold while it syncs, steady gold with changes still to save, red after a problem.
+// It keeps its words where they tell the person something to do: "Demo", "This device only",
+// and "2 to commit" for a repo, where a press makes the commit. The words are always there for
+// a screen reader.
+let pressedSync = false; // a sync that the person started: it shows as syncing for a moment even when it is quick
 function drawChip() {
-  const chip = $('#sync-chip'), { state } = store.status, dirty = store.dirtyCount;
+  const chip = $('#sync-chip'), dirty = store.dirtyCount;
+  const state = pressedSync ? 'syncing' : store.status.state;
   const [cls, text] = state === 'syncing' ? ['busy', 'Syncing…']
     : store.demo && !store.connected ? ['demo', 'Demo']
     : !store.connected ? ['off', native ? 'Not signed in' : 'This device only']
     : dirty ? ['dirty', store.words.pending(dirty)]
     : state === 'error' ? ['bad', 'Sync problem']
     : ['ok', 'In sync'];
-  chip.className = 'sync ' + cls;
-  chip.textContent = text;
-  chip.title = state === 'error' ? store.status.message : store.connected ? 'Sync now' : native ? 'Sign in to your Gyle account' : 'Choose where to keep your recipes';
+  const words = cls === 'demo' || cls === 'off' || (cls === 'dirty' && !store.auto);
+  chip.className = `sync ${cls}${words ? '' : ' dot'}`;
+  chip.innerHTML = words ? esc(text) : `<span class="sr">${esc(text)}</span>`;
+  chip.title = state === 'error' ? `Sync problem: ${store.status.message}` : state === 'syncing' ? 'Syncing…'
+    : store.connected ? (dirty ? `${text}. Press to save now` : 'In sync. Press to sync now') : native ? 'Sign in to your Gyle account' : 'Choose where to keep your recipes';
   drawDemoBar();
 }
 
-$('#sync-chip').addEventListener('click', async () => {
+// The small popup under the sync light. It says how a sync that the person started is going,
+// and it explains a red light.
+let tipTimer = 0;
+function showTip(text, { bad = false, retry = false, ms = 0 } = {}) {
+  const tip = $('#sync-tip');
+  clearTimeout(tipTimer);
+  tip.className = 'sync-tip' + (bad ? ' bad' : '');
+  tip.innerHTML = `<span>${esc(text)}</span>${retry ? '<button type="button" class="btn small" id="sync-retry">Try again</button>' : ''}`;
+  tip.hidden = false;
+  if (ms) tipTimer = setTimeout(hideTip, ms);
+}
+function hideTip() {
+  clearTimeout(tipTimer);
+  $('#sync-tip').hidden = true;
+}
+const showProblem = () => showTip(`Sync problem: ${store.status.message || 'the last sync did not finish.'}`, { bad: true, retry: true });
+async function syncNow() {
+  if (store.dirtyCount && !store.canWrite) { hideTip(); toast(store.words.need, true); location.hash = '#settings/storage'; return; }
+  showTip('Syncing…');
+  const saving = store.dirtyCount > 0, least = new Promise(done => setTimeout(done, 700));
+  pressedSync = true;
+  drawChip();
+  try {
+    if (saving) await store.push(); else await store.sync();
+  } catch { /* the status holds the message */ }
+  await least;
+  pressedSync = false;
+  drawChip();
+  if (store.status.state === 'error') showProblem();
+  else showTip(saving ? store.words.all : 'In sync.', { ms: 1800 });
+}
+$('#sync-chip').addEventListener('click', () => {
   if (!store.connected) { location.hash = native ? '#welcome' : '#settings/storage'; return; }
-  if (store.dirtyCount) {
-    if (!store.canWrite) { toast(store.words.need, true); location.hash = '#settings/storage'; return; }
-    try { await store.push(); toast(store.words.all); } catch (e) { toast(e.message, true); }
-  } else {
-    await store.sync();
-    if (store.status.state === 'error') toast(store.status.message, true);
-  }
+  if (store.status.state === 'syncing' || pressedSync) return showTip('Syncing…', { ms: 1800 });
+  // A red light first says what is wrong. "Try again" in the popup, or a second press, syncs.
+  if (store.status.state === 'error' && !store.dirtyCount && $('#sync-tip').hidden) return showProblem();
+  syncNow();
 });
+document.addEventListener('click', e => {
+  if (e.target.closest('#sync-retry')) return void syncNow();
+  if (!e.target.closest('#sync-tip, #sync-chip')) hideTip();
+});
+window.addEventListener('hashchange', hideTip);
 
 function drawTimerChip() {
   const chip = $('#timer-chip'), st = timer.state;

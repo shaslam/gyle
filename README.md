@@ -70,6 +70,19 @@ in the meantime.
 - On load the app pulls anything that changed in the repo. If the same recipe was edited
   on two devices, the later commit wins; the earlier version is still in git history.
 
+## The sync light
+
+The round light at the top right shows the state of your data:
+
+- Green: everything is in sync.
+- Flashing gold: Gyle is syncing.
+- Steady gold: a change waits to be saved. A Gyle account saves it by itself a moment later.
+- Red: the last sync failed. Press the light to read the reason and to try again.
+
+Press the light at any time to sync now. A small popup says how it went. With a GitHub repo,
+the light shows words when there are changes to commit, for example "2 to commit", and a
+press makes the commit.
+
 ## What is in the repo
 
 ```
@@ -125,6 +138,9 @@ Archived recipes are not in the queue or in the brew picker. To see them, set Sh
 Archived. To bring one back, press Restore on its row, or choose In planning or Ready to
 brew on the recipe. To archive many recipes at once, set Show to a status or type a
 search, then press "Archive these".
+
+On a touch screen, hold the handle for a moment before you drag. A finger that starts on a
+handle and moves at once scrolls the page, so a scroll does not move a recipe by accident.
 
 ## Versions and new recipes
 
@@ -221,8 +237,8 @@ A photo is usually 150 to 400 kB. The photos are kept in the browser and saved w
 - **GitHub repo**: as `photos/<id>.jpg` in the repo. Each photo is one commit, made with the
   commit of its brew. A public repo makes the photos public. Keep your data in a private repo.
 - **Gyle account**: in Supabase Storage, in a private `photos` bucket. Run
-  `supabase/setup.sql` again to create the bucket. Until you do, the status chip says
-  "Photos not saved yet".
+  `supabase/setup.sql` again to create the bucket. Until you do, the sync light is red and
+  its popup says "Photos not saved yet".
 
 Notes from a Brewfather backup arrive in the timeline. Some brews came in before the timeline
 existed. If you open one of them, Gyle moves its dated notes into the timeline.

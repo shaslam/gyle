@@ -59,7 +59,7 @@ with sync_playwright() as p:
     web.goto(U+'#recipes'); web.wait_for_timeout(400); web.focus('#show'); web.keyboard.press('Enter'); web.wait_for_timeout(200)
     print('  a dropdown keeps the browser list: Gyle popups', web.locator('dialog.choose').count()); web.close()
 
-    pg = b.new_page(viewport={'width':390,'height':844}, device_scale_factor=2)
+    pg = b.new_page(viewport={'width':390,'height':844}, device_scale_factor=2, has_touch=True)
     errs=[]; pg.on('pageerror', lambda e: errs.append(str(e)))
     pg.add_init_script(FAKE); pg.route('**/js/config.js', config); pg.route(SB+'/**', sb)
     calls=lambda name: [c[1:] for c in pg.evaluate('window.__calls') if c[0]==name]
@@ -96,6 +96,23 @@ with sync_playwright() as p:
     pg.click('#show'); pg.click('dialog.choose .pick >> text=Ready and planning'); pg.wait_for_timeout(300)
     pg.click('#sort'); pg.wait_for_timeout(200); pg.mouse.click(5, 5); pg.wait_for_timeout(200)
     print('  tap outside closes it:', pg.locator('dialog.choose').count()==0, '| unchanged:', pg.eval_on_selector('#sort', 'e=>e.selectedOptions[0].text'))
+
+    # The brew queue. A finger that starts on a handle and moves at once scrolls the page.
+    # A finger that holds the handle first picks the recipe up, and a drag then moves it.
+    cdp = pg.context.new_cdp_session(pg)
+    def finger(kind, x=0, y=0): cdp.send('Input.dispatchTouchEvent', {'type': kind, 'touchPoints': [] if kind == 'touchEnd' else [{'x': x, 'y': y}]})
+    def drag(sel, dy, hold):
+        box = pg.locator(sel).bounding_box(); x = box['x'] + box['width']/2; y = box['y'] + box['height']/2
+        finger('touchStart', x, y); pg.wait_for_timeout(hold)
+        for i in range(1, 13): finger('touchMove', x, y + dy*i/12); pg.wait_for_timeout(16)
+        lifted = pg.locator('.q-row.dragging').count(); finger('touchEnd'); pg.wait_for_timeout(500); return lifted
+    lifted = drag('.grip >> nth=0', -220, 0)
+    print('  queue, a swipe that starts on a handle: row picked up', lifted, '| page scrolled', pg.evaluate('scrollY') > 100, '| order', names()[:2])
+    pg.evaluate('scrollTo(0, 0)'); pg.wait_for_timeout(200); lifted = drag('.grip >> nth=0', 150, 450)
+    print('  queue, hold then drag: row picked up', lifted, '| page scrolled', pg.evaluate('scrollY') > 0, '| order', names()[:2])
+    pg.evaluate('scrollTo(0, 0)'); pg.wait_for_timeout(200); lifted = drag('.grip >> nth=0', 150, 120)
+    print('  queue, a hold that is too short: row picked up', lifted, '| order', names()[:2])
+    pg.evaluate('scrollTo(0, 0)'); pg.wait_for_timeout(200)
 
     # From the demo to an account: the strip leads to the welcome screen. Signing in removes the demo.
     pg.click('#demo-bar'); pg.wait_for_timeout(300)

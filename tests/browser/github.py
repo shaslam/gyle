@@ -44,7 +44,7 @@ with sync_playwright() as p:
     pg.fill('#gh-repo','stu/data'); pg.fill('#gh-token','TOKEN'); pg.click('[data-act=connect]'); pg.wait_for_timeout(1500)
     print('connect:', pg.inner_text('#storage-msg'), '| chip:', chip())
     pg.goto(U+'#recipes'); pg.wait_for_timeout(500); print('list:', names())
-    pg.click('#sync-chip'); pg.wait_for_timeout(1500); print('commit all:', chip(), '| toast:', pg.inner_text('#toast'), '| files:', sorted(files))
+    pg.click('#sync-chip'); pg.wait_for_timeout(1500); print('commit all:', chip(), '| popup:', pg.inner_text('#sync-tip'), '| files:', sorted(files))
     pg.goto(U+'#recipe/repo-bitter'); pg.wait_for_timeout(1300); print('editor:', pg.inner_text('#save-btn'))
     pg.fill('#f-name','Repo Bitter 2'); pg.wait_for_timeout(3200); print('no autosave in git mode:', pg.inner_text('#save-btn'), chip())
     files['recipes/repo-bitter.json']=files['recipes/repo-bitter.json'].replace('"carbonation": 2.4','"carbonation": 2.5')  # someone else changed it
