@@ -46,7 +46,7 @@ of a Gyle account clears the device copy.
 3. Under **Authentication → URL Configuration**, set the Site URL to the address the app is
    served from (for example `https://<you>.github.io/<repo>/`). Sign-in links and
    GitHub/Google sign-in return there.
-4. Optional: under **Authentication → Providers**, switch on GitHub or Google. Each one
+4. Optional: under **Authentication → Sign In / Providers**, switch on GitHub or Google. Each one
    needs a client ID and a secret from an OAuth app that you create at GitHub or in the
    Google Cloud console. Supabase shows the steps and the callback address beside each
    provider. The sign-in form shows a "Continue with" button only for a provider that is
