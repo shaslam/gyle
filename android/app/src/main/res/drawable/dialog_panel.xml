@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The panel behind Android's own dialogs: cream with round corners, like a popup in the page. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android" android:inset="16dp">
+    <shape android:shape="rectangle">
+        <corners android:radius="16dp" />
+        <solid android:color="@color/cream" />
+    </shape>
+</inset>

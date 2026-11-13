@@ -9,6 +9,8 @@ import { sheetHtml, sheetPdf } from './brewsheet.js';
 import { isBrewfatherBackup, fromBrewfatherBackup } from './brewfather.js';
 import { unzip } from './unzip.js';
 import { photos, shrink, newPhotoId } from './photos.js';
+import { native, ios } from './native.js';
+import { pickSelects } from './picker.js';
 
 // ---------- helpers ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -63,6 +65,7 @@ function toast(msg, kind = '') { // kind: '' | true (error) | 'alert' (timer)
 $('#toast').addEventListener('click', () => { $('#toast').className = ''; });
 
 function download(filename, text, mime) {
+  if (native) return void saveInApp(filename, text, mime);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: mime }));
   a.download = filename;
@@ -70,6 +73,17 @@ function download(filename, text, mime) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// An app has no download link to follow: it is handed the file. The Android app puts it in
+// Downloads. The iOS app opens a brew sheet in a viewer, and the share sheet for any other file.
+async function saveInApp(filename, data, mime) {
+  const bytes = new Uint8Array(await new Blob([data]).arrayBuffer());
+  let text = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const problem = native.saveFile(filename, mime, btoa(text));
+  if (problem) toast(problem, true);
+  else if (!ios) toast(`Saved in Downloads as ${filename}`);
 }
 
 // A pint of the beer in question. `level` 0..1 is how full it is; the outline takes the text colour.
@@ -161,12 +175,24 @@ function photoDialog(pid, caption, when) {
 // Two-tap confirmation for destructive buttons: the first tap arms the button, the second does it.
 function confirmTap(b, label) {
   if (b.dataset.armed) return true;
-  const old = b.textContent;
+  const old = b.innerHTML, words = b.querySelector(':scope > span'); // an icon button keeps its icon: only the words change
   b.dataset.armed = '1';
-  b.textContent = label;
-  setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = old; } }, 4000);
+  (words || b).textContent = label;
+  setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.innerHTML = old; } }, 4000);
   return false;
 }
+
+// Icons for the row of actions under a recipe and a brew log. Drawn as lines in the text colour.
+const ICONS = {
+  sheet: '<path d="M9 3.5h6v3H9z"/><path d="M9 5H7a2 2 0 0 0-2 2v11.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M8.5 11h7M8.5 14.5h7M8.5 18h4"/>',
+  copy: '<rect x="9" y="9" width="11" height="11.5" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h3"/>',
+  export: '<path d="M12 15V3.5M7.5 8 12 3.5 16.5 8M5 13.5v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/>',
+  again: '<path d="M19.5 12a7.5 7.5 0 1 1-2.6-5.7M19.5 3.5v4h-4"/>',
+  trash: '<path d="M4.5 7h15M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M6.5 7l.8 11.6a2 2 0 0 0 2 1.9h5.4a2 2 0 0 0 2-1.9L17.5 7M10 11v5.5M14 11v5.5"/>',
+};
+const icon = name => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+// One icon button with a short label under it. `more` holds its attributes, and a link has an href in them.
+const tile = (name, label, more) => (/\bhref=/.test(more) ? `<a class="tile" ${more}>${icon(name)}<span>${label}</span></a>` : `<button type="button" class="tile${name === 'trash' ? ' danger' : ''}" ${more}>${icon(name)}<span>${label}</span></button>`);
 
 // One form field. `c` = { f, label, num, opts, list, autofill, rerender, type, cls }
 function field(c, path, value) {
@@ -1125,8 +1151,23 @@ function recipeView(id) {
         const rest = versionsOf(family);
         if (rest.length) { swapInQueue(id, rest.at(-1).id); location.hash = '#recipe/' + rest.at(-1).id; } else location.hash = '#recipes';
       },
-      'export-json': () => download(slug(vName(r)) + '.json', JSON.stringify(toBeerJSON(r), null, 2), 'application/json'),
-      'export-xml': () => download(slug(vName(r)) + '.xml', toBeerXML(r), 'text/xml'),
+      // Export asks which format, then saves the file.
+      export() {
+        const name = slug(vName(r));
+        sheetDialog(`<div class="sec-head"><h2>Export recipe</h2><button type="button" class="icon-btn" data-x aria-label="Close">×</button></div>
+          <div class="picks">
+            <button type="button" class="pick" data-fmt="json"><span>BeerJSON</span><small>${esc(name)}.json</small></button>
+            <button type="button" class="pick" data-fmt="xml"><span>BeerXML</span><small>${esc(name)}.xml</small></button>
+          </div>
+          <p class="hint">BeerJSON is the format Gyle stores, so it keeps every detail. BeerXML is the older format that most brewing software can read.</p>`,
+        () => {}, dlg => dlg.addEventListener('click', e => {
+          const fmt = e.target.closest('[data-fmt]')?.dataset.fmt;
+          if (!fmt) return;
+          if (fmt === 'json') download(name + '.json', JSON.stringify(toBeerJSON(r), null, 2), 'application/json');
+          else download(name + '.xml', toBeerXML(r), 'text/xml');
+          dlg.close();
+        }));
+      },
       brew() { location.hash = '#brew/' + newBrew(id, r); },
       status(btn) {
         const was = statusOf(r);
@@ -1227,13 +1268,14 @@ function recipeView(id) {
       ${versionOf(r) > 1 ? field({ label: `What changed in version ${versionOf(r)}`, cls: 'block' }, 'versionNote', r.versionNote || '') : ''}
       ${field({ label: 'Notes', area: 5, cls: 'block' }, 'notes', r.notes)}
     </section>
-    <div class="foot-actions">
+    <div class="end-actions">
       <button type="button" class="btn primary" data-act="brew">Brew this recipe</button>
-      <a class="btn" href="#sheet/${id}">Brew sheet</a>
-      <button type="button" class="btn" data-act="new-from">New recipe from this</button>
-      <button type="button" class="btn" data-act="export-json">Export BeerJSON</button>
-      <button type="button" class="btn" data-act="export-xml">Export BeerXML</button>
-      <button type="button" class="btn danger" data-act="delete">Delete</button>
+      <div class="toolbar">
+        ${tile('sheet', 'Brew sheet', `href="#sheet/${id}"`)}
+        ${tile('copy', 'Copy', 'data-act="new-from" title="New recipe from this one"')}
+        ${tile('export', 'Export', 'data-act="export" title="Export as BeerJSON or BeerXML"')}
+        ${tile('trash', 'Delete', 'data-act="delete"')}
+      </div>
     </div>`;
   ['fermentables', 'hops', 'yeasts', 'miscs', 'mash', 'fermentation'].forEach(renderList);
   let poured = false; // the pint pours once, when the recipe opens
@@ -1598,22 +1640,10 @@ function brewDaysChart(items, width = 340) {
 }
 
 function brewsView() {
-  const recipes = queued(latestOnly(store.list('recipes'))).filter(x => statusOf(x.data) !== 'archived'); // newest versions, in queue order
-  const nextUp = recipes.find(r => r.data.status === 'ready')?.id; // first ready recipe is preselected
-  ctx = {
-    actions: {
-      new() {
-        const rid = $('#brew-recipe').value, r = store.get('recipes', rid);
-        if (r) location.hash = '#brew/' + newBrew(rid, r);
-      },
-    },
-  };
+  ctx = {};
   const brews = store.list('brews').sort((a, b) => (b.data.brewDate || '').localeCompare(a.data.brewDate || ''));
   view.innerHTML = `
     <div class="page-head"><h1>Brews</h1></div>
-    ${recipes.length ? `<div class="card"><div class="row">
-      <label class="fld w-name" for="brew-recipe"><span>Start a brew from</span><select id="brew-recipe">${recipes.map(r => `<option value="${r.id}"${r.id === nextUp ? ' selected' : ''}>${esc(vName(r.data))}${r.data.status === 'ready' ? '' : ' (in planning)'}</option>`).join('')}</select></label>
-      <button type="button" class="btn primary" data-act="new">Start brew</button></div></div>` : ''}
     <section class="card" id="brew-days" hidden></section>
     <div class="list">${brews.length ? brews.map(({ id, data: b, dirty }) => {
       const m = b.measured || {}, typed = [...(b.readings || [])].filter(x => x.sg).sort((a, c) => (a.date || '').localeCompare(c.date || '')).at(-1);
@@ -1625,7 +1655,7 @@ function brewsView() {
         <span class="pill s-${b.status.replace(' ', '-')}">${esc(b.status)}</span>
         <span class="item-stats"><span><b>${sg(m.og)}</b> OG</span><span><b>${sg(fg)}</b> SG</span><span><b>${m.og && fg ? n(C.abv(m.og, fg)) : '–'}</b> %</span></span>
       </a>`;
-    }).join('') : `<div class="empty-state"><h2>No brews logged</h2><p>${recipes.length ? 'Pick a recipe above to start a brew. It keeps a snapshot of the recipe, a brew-day checklist, your measurements and gravity readings.' : 'Create a recipe first, then start a brew from it.'}</p></div>`}</div>`;
+    }).join('') : `<div class="empty-state"><h2>No brews logged</h2><p>Open a recipe and press Brew this recipe. A brew log keeps a snapshot of the recipe, a brew-day checklist, your measurements and gravity readings.</p></div>`}</div>`;
   loadPhotos(view);
   // Drawn at the card's own width, so dots and labels keep one size on a phone and on a wide screen.
   const dayItems = brews.map(({ id, data: b }) => ({ id, name: b.name, date: b.brewDate || '', hex: C.srmToHex(C.recipeStats(b.recipe, b.equipment || equipFor(b.recipe)).srm) }));
@@ -1696,6 +1726,14 @@ function brewView(id) {
     actions: {
       ...listActions,
       save: () => commit('brews', id),
+      // A new brew log from the same recipe. It uses the newest version of the recipe as it is now.
+      // If the recipe was deleted, it uses the copy that this log holds.
+      again() {
+        const latest = versionsOf(familyOf(b.recipeId, b.recipe)).at(-1);
+        const r = latest?.data || b.recipe;
+        location.hash = '#brew/' + newBrew(latest?.id || b.recipeId, r);
+        toast(`New brew log from ${vName(r)}.`);
+      },
       delete(btn) {
         if (!confirmTap(btn, 'Tap again to delete')) return;
         const mine = photoIdsOf(b);
@@ -1826,7 +1864,8 @@ function brewView(id) {
     }
     if (!st || st.brewId !== id) { timer.open(id, b.name, segs, true); return; } // redraws through the change event
     const seg = st.segments[st.seg], running = timer.running;
-    const note = { granted: 'Notifications are on.', denied: 'Notifications are blocked for this site in your browser settings. The timer will still beep and show an alert here.', unsupported: 'This browser cannot show notifications here. The timer will still beep and show an alert on screen.' }[timer.notifyStatus()];
+    const allowed = timer.notifyStatus(), canAsk = allowed === 'default' || (native && allowed === 'denied');
+    const note = { granted: 'Notifications are on.', denied: native ? 'Notifications are off for Gyle. The timer will still beep and show an alert here.' : 'Notifications are blocked for this site in your browser settings. The timer will still beep and show an alert here.', unsupported: 'This browser cannot show notifications here. The timer will still beep and show an alert on screen.' }[allowed];
     el.innerHTML = head(running ? 'running' : st.done ? 'finished' : st.started ? 'paused' : 'ready') + `
       <div class="segs">${st.segments.map((x, i) => `<button type="button" class="seg${i === st.seg ? ' on' : ''}" data-act="t-seg" data-i="${i}"${i === st.seg ? ' aria-current="step"' : ''}>${esc(x.name)} <b>${x.min}</b></button>`).join('')}</div>
       <div class="t-face${running ? ' run' : ''}"><div class="t-glass" id="t-glass"></div><div class="t-read"><output class="t-time" id="t-time"></output><div class="t-next" id="t-next"></div></div></div>
@@ -1840,7 +1879,7 @@ function brewView(id) {
       <div class="t-opts">
         <label for="t-wake"><input type="checkbox" id="t-wake"${timer.prefs.wake ? ' checked' : ''}><span>Keep the screen on while the timer runs</span></label>
         <p class="hint">${note || 'Get a notification when a step ends or an addition is due.'}
-          ${note ? '' : '<button type="button" class="btn small" data-act="t-notify">Turn on notifications</button>'}
+          ${canAsk ? '<button type="button" class="btn small" data-act="t-notify">Turn on notifications</button>' : ''}
           <button type="button" class="btn small ghost" data-act="t-test">Test alert</button></p>
       </div>`;
     tickTimer();
@@ -1889,7 +1928,11 @@ function brewView(id) {
       ${field({ label: 'Tasting notes', area: 4, cls: 'block' }, 'tasting', b.tasting)}
       <div class="rate-wrap"><span class="rate-label" id="rate-label">Rating</span><div class="rate" id="rate" role="group" aria-labelledby="rate-label"></div>
         <p class="hint">Tap a glass to rate the beer out of 5. Tap the same glass again to clear the rating.</p></div></section>
-    <div class="foot-actions"><a class="btn" href="#sheet/brew/${id}">Brew sheet</a><button type="button" class="btn danger" data-act="delete">Delete brew log</button></div>`;
+    <div class="toolbar">
+      ${tile('sheet', 'Brew sheet', `href="#sheet/brew/${id}"`)}
+      ${tile('again', 'Brew again', 'data-act="again" title="Start a new brew log from this recipe"')}
+      ${tile('trash', 'Delete', 'data-act="delete" title="Delete this brew log"')}
+    </div>`;
   renderList('readings');
   drawRating();
   drawArt();
@@ -2136,7 +2179,7 @@ function sheetView(arg) {
   const model = sheetModel(r, eq, b);
   ctx = {
     actions: {
-      print: () => window.print(),
+      print: () => (native ? native.print(model.title) : window.print()),
       pdf: () => download(`${slug(model.title)}-brew-sheet.pdf`, sheetPdf(model), 'application/pdf'),
     },
   };
@@ -2517,7 +2560,8 @@ function settingsView(sub) {
         <div class="foot-actions alt"><button type="button" class="btn small" data-act="sb-oauth" data-v="github">Continue with GitHub</button><button type="button" class="btn small" data-act="sb-oauth" data-v="google">Continue with Google</button></div>
         <p class="hint">Signing in copies any recipes already on this device into your account.</p>`}`
       : '<p class="hint">Nothing leaves this browser. Clearing its site data would delete everything, so export the recipes you care about, or choose one of the other options to keep a proper copy.</p>';
-    el.innerHTML = `<div class="segs" role="group" aria-label="Where to keep your data">${seg('local', 'This device')}${seg('supabase', 'Gyle account')}${seg('git', 'GitHub repo')}</div>
+    // The Android and iOS apps keep data in a Gyle account only, so they offer no choice.
+    el.innerHTML = `${native ? '' : `<div class="segs" role="group" aria-label="Where to keep your data">${seg('local', 'This device')}${seg('supabase', 'Gyle account')}${seg('git', 'GitHub repo')}</div>`}
       ${body}<p class="hint" id="storage-msg" role="status">${esc(storageMsg)}</p>`;
   }
   const pages = {
@@ -2532,12 +2576,12 @@ function settingsView(sub) {
       <div class="foot-actions"><button type="button" class="btn" data-act="add-water">Add water profile</button></div>
     </section>`,
     devices: `<section class="card"><div class="sec-head"><h2>Hydrometer devices</h2></div>
-      <p class="hint">An iSpindel that posts to a ThingSpeak channel. Add it here once, then choose it on each brew log to bring in its gravity readings. The read key is kept in this browser only, so enter it on each device you use.</p>
+      <p class="hint">An iSpindel that posts to a ThingSpeak channel. Add it here once, then choose it on each brew log to bring in its gravity readings. The read key is kept ${native ? 'on this phone' : 'in this browser'} only, so enter it on each device you use.</p>
       <div id="devices"></div>
       <div class="foot-actions"><button type="button" class="btn" data-act="add-device">Add device</button></div>
     </section>`,
     storage: `<section class="card"><div class="sec-head"><h2>Storage</h2></div>
-      <p class="hint">Where your recipes, brew logs and settings are kept. Whichever you choose, this browser keeps a working copy so Gyle still works offline.</p>
+      <p class="hint">${native ? 'Your recipes, brew logs and settings are kept in your Gyle account. The app keeps a working copy on this phone, so Gyle still works offline.' : 'Where your recipes, brew logs and settings are kept. Whichever you choose, this browser keeps a working copy so Gyle still works offline.'}</p>
       <div id="storage"></div>
     </section>`,
   };
@@ -2574,13 +2618,13 @@ function route(keepScroll = false) {
 function drawChip() {
   const chip = $('#sync-chip'), { state } = store.status, dirty = store.dirtyCount;
   const [cls, text] = state === 'syncing' ? ['busy', 'Syncing…']
-    : !store.connected ? ['off', 'This device only']
+    : !store.connected ? ['off', native ? 'Not signed in' : 'This device only']
     : dirty ? ['dirty', store.words.pending(dirty)]
     : state === 'error' ? ['bad', 'Sync problem']
     : ['ok', 'In sync'];
   chip.className = 'sync ' + cls;
   chip.textContent = text;
-  chip.title = state === 'error' ? store.status.message : store.connected ? 'Sync now' : 'Choose where to keep your recipes';
+  chip.title = state === 'error' ? store.status.message : store.connected ? 'Sync now' : native ? 'Sign in to your Gyle account' : 'Choose where to keep your recipes';
 }
 
 $('#sync-chip').addEventListener('click', async () => {
@@ -2600,7 +2644,7 @@ function drawTimerChip() {
   if (!st?.started) return;
   chip.href = '#brew/' + st.brewId;
   chip.className = 'tchip' + (timer.running ? ' run' : st.done ? ' done' : '');
-  chip.textContent = `${st.segments[st.seg].name} ${st.done ? 'done' : clock(timer.remaining())}`;
+  chip.innerHTML = `<span class="t-step">${esc(st.segments[st.seg].name)}</span><span>${st.done ? 'done' : clock(timer.remaining())}</span>`;
 }
 // The browser tab shows the countdown while the timer runs, so it can be read from another tab.
 const BASE_TITLE = document.title, SHORT_TITLE = 'Gyle'; // the timer uses the short name, so the time stays visible
@@ -2624,6 +2668,7 @@ function datalists() {
 
 store.init();
 datalists();
+if (native) pickSelects(); // Gyle's own popup for every <select>, in place of the phone's own list
 let lastSynced = false;
 store.on(() => {
   drawChip();
@@ -2635,18 +2680,36 @@ store.on(() => {
   else ctx.refresh?.();
   lastSynced = synced;
 });
-window.addEventListener('hashchange', () => route());
 window.addEventListener('beforeunload', () => store.persist());
-// Arriving from a sign-in link (email confirmation, password reset, GitHub or Google)?
-const arrived = await store.account.takeRedirect();
-if (arrived?.ok) store.setMode('supabase');
+// A phone can close a page in the background without warning, so keep the working copy when the
+// page is hidden. An app stays open for days: it looks for changes when it comes back.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') store.persist();
+  else if (native && Date.now() - store.lastSync > 5 * 60000) store.sync();
+});
+// Arriving from a sign-in link (email confirmation, password reset, GitHub or Google)? The link is
+// read when the page loads. An app can also hand one to a page that is already open.
+async function arrive() {
+  const arrived = await store.account.takeRedirect();
+  if (arrived?.ok) store.setMode('supabase');
+  return arrived;
+}
+function greet(arrived) {
+  if (arrived?.error) toast(`Sign-in did not complete: ${arrived.error}`, true);
+  else if (arrived?.recovering) toast('Choose a new password in Settings.');
+  else if (arrived?.ok) toast('Signed in.');
+}
+window.addEventListener('hashchange', async () => {
+  const arrived = await arrive();
+  route();
+  if (arrived) { greet(arrived); store.sync(); }
+});
+const arrived = await arrive();
 drawChip();
 drawTimerChip();
 drawTabTitle();
 route();
-if (arrived?.error) toast(`Sign-in did not complete: ${arrived.error}`, true);
-else if (arrived?.recovering) toast('Choose a new password in Settings.');
-else if (arrived?.ok) toast('Signed in.');
+greet(arrived);
 store.sync();
 
 // First run without a repo (a local test, say): load the example recipe that ships in recipes/.

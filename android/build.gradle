@@ -1,0 +1,5 @@
+// The Android app for Gyle. It has one module (app/) and no libraries: only the Android
+// Gradle plugin, which builds it.
+plugins {
+    id 'com.android.application' version '9.5.1' apply false
+}

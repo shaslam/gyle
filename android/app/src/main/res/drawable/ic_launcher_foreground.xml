@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The pint glass from the site icon, inside the middle 66dp that every icon shape keeps. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="2.6" android:scaleY="2.6" android:translateX="12.4" android:translateY="11.1">
+        <path android:fillColor="#EAA21A" android:pathData="M9,7h14l-2,17a2,2 0,0 1,-2 2h-6a2,2 0,0 1,-2 -2z" />
+        <path android:fillColor="#FFFAF0" android:pathData="M9,7h14l-0.6,5H9.6z" />
+    </group>
+</vector>

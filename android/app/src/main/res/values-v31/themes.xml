@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12 and later show the app icon on this colour while the app starts. -->
+    <style name="Gyle" parent="android:Theme.DeviceDefault.Light.NoActionBar">
+        <item name="android:windowBackground">@color/wall</item>
+        <item name="android:statusBarColor">@color/green</item>
+        <item name="android:navigationBarColor">@color/wall</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:colorAccent">@color/gold</item>
+        <item name="android:alertDialogTheme">@style/Gyle.Dialog</item>
+        <item name="android:datePickerDialogTheme">@style/Gyle.Dialog</item>
+        <item name="android:timePickerDialogTheme">@style/Gyle.Dialog</item>
+        <item name="android:windowSplashScreenBackground">@color/green_deep</item>
+    </style>
+</resources>

@@ -1,0 +1,79 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Release builds are signed with your own key when android/keystore.properties exists
+// (storeFile, storePassword, keyAlias, keyPassword). The file and the key stay out of git.
+def keys = new Properties()
+def keysFile = rootProject.file('keystore.properties')
+if (keysFile.exists()) keysFile.withInputStream { keys.load(it) }
+
+android {
+    namespace = 'io.github.shaslam.gyle'
+    compileSdk = 36
+    enableKotlin = false   // the app is Java only, so it does not need the Kotlin library
+
+    defaultConfig {
+        applicationId = 'io.github.shaslam.gyle'
+        minSdk = 29      // Android 10
+        targetSdk = 36
+        versionCode = 1
+        versionName = '1.0'
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    signingConfigs {
+        if (keysFile.exists()) {
+            release {
+                storeFile = rootProject.file(keys['storeFile'])
+                storePassword = keys['storePassword']
+                keyAlias = keys['keyAlias']
+                keyPassword = keys['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = false
+            if (keysFile.exists()) signingConfig = signingConfigs.release
+        }
+    }
+}
+
+// The app shows the same files as the website. This task copies them from the repo root into
+// the app (as assets/www/) on every build, so there is one copy of the web code to maintain.
+// A file that the page needs but that is not in this list gives a 404 inside the app.
+abstract class WebFiles extends DefaultTask {
+    @Internal abstract DirectoryProperty getSite()
+    @Input abstract ListProperty<String> getPaths()
+    @InputFiles @PathSensitive(PathSensitivity.RELATIVE) abstract ConfigurableFileCollection getSources()
+    @OutputDirectory abstract DirectoryProperty getOutputDir()
+    @Inject abstract FileSystemOperations getFiles()
+
+    @TaskAction
+    void copy() {
+        files.sync { spec ->
+            spec.from(site) { it.include(paths.get()) }
+            spec.into(outputDir.dir('www'))
+        }
+    }
+}
+
+def siteDir = rootProject.layout.projectDirectory.dir('..')
+def sitePaths = ['index.html', 'css/**', 'js/**', 'fonts/**', 'recipes/house-pale-ale.json']
+def webFiles = tasks.register('webFiles', WebFiles) {
+    site = siteDir
+    paths = sitePaths
+    sources.from(fileTree(siteDir) { include sitePaths })
+}
+
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(webFiles, WebFiles::getOutputDir)
+    }
+}

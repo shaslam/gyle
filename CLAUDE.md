@@ -13,11 +13,17 @@ the user-facing guide; this is the working context.
 python3 -m http.server 8000        # then open http://localhost:8000 (ES modules need http, not file://)
 node tests/calc.test.mjs           # brewing maths, BeerJSON round trip, water and mash pH
 python3 tests/browser/supabase.py  # browser tests against simulated services; see the header of each file
+python3 tests/browser/native.py    # the web files in Android-app mode, with a fake GyleNative object
+python3 tests/browser/ios.py       # the web files in iOS-app mode, in Playwright's WebKit, with the real ios/bridge.js
+cd android && ./gradlew assembleDebug lintDebug   # the Android app (needs android/local.properties with sdk.dir)
+node --experimental-websocket tests/android/device.mjs   # the app on an emulator; Node 22+ needs no flag
 ```
 
 The browser tests need Python Playwright (`pip install playwright` in a virtual environment), Google Chrome, and the app served on port 8765.
 
 Always run `node tests/calc.test.mjs` after touching `js/calc.js`, `js/data.js` or `js/beerjson.js`.
+
+The Android app and the iOS app pack the web files at build time. After a change to `index.html`, `css/`, `js/` or `fonts/`, an app shows it only after a new build and install. A new top-level web file or folder must also be added to `sitePaths` in `android/app/build.gradle` and to `ios/copy-web-files.sh`, or the page gets a 404 for it inside the app.
 
 ## Ground rules
 
@@ -45,7 +51,12 @@ Always run `node tests/calc.test.mjs` after touching `js/calc.js`, `js/data.js` 
 | `js/photos.js` | Brew photos: IndexedDB copy of each JPEG (`{ id, blob, owner, deleted }`), `shrink()` to 1600 px, `flush(backend)` uploads and deletes. `store.push()` and `store.sync()` call it. A photo error does not stop documents saving. Backends add `putFile`/`getFile`/`removeFile`. Git uses `photos/<id>.jpg`, Supabase uses the Storage bucket `photos` with one folder per user id |
 | `js/backend-git.js` | Storage backend: GitHub contents API, one commit per save |
 | `js/backend-supabase.js` | Storage backend: Supabase Auth + a `documents` table over plain `fetch` (no SDK) |
-| `js/config.js` | Supabase project URL and public key (currently empty: typed into Settings instead) |
+| `js/config.js` | Supabase project URL and public key (filled in, so Settings does not ask for them) |
+| `js/native.js` | `native`: the `GyleNative` object of the Android or iOS app, or null in a browser. Every app-only branch in the web code tests this. `ios` is true in the iOS app only (`native.platform === 'ios'`). Also `APP_LINK` (`gyle://auth`) |
+| `js/picker.js` | `pickSelects()`: in the Android and iOS apps, a tap on any single `<select>` opens a `dialog.choose` popup with `.pick` rows in place of Android's list. It sets the select and sends `input` and `change`, so screens need no changes |
+| `android/` | The Android app. Plain Java, no libraries, one Activity with a WebView. See "Android app" below |
+| `ios/` | The iOS app. Plain Swift (UIKit), no libraries, one view controller with a WKWebView. See "iOS app" below |
+| `.github/workflows/ios-build.yml` | Builds `ios/` for the simulator on a GitHub Mac (push under `ios/`, or by hand). The only compile check there is without a Mac |
 | `js/brewsheet.js` | Brew sheet: `sheetHtml(model)` and `sheetPdf(model)` draw the same description. `sheetModel()` in `app.js` builds it |
 | `js/pdf.js` | Minimal PDF writer: A4 pages, Helvetica and Helvetica-Bold (not embedded, WinAnsi only), text, lines, boxes, shapes |
 | `js/timer.js` | Brew-day timer, alerts, notifications, wake lock |
@@ -54,6 +65,36 @@ Always run `node tests/calc.test.mjs` after touching `js/calc.js`, `js/data.js` 
 | `sw.js` | Minimal service worker so Android can show timer notifications. Caches nothing |
 | `supabase/setup.sql` | Database setup for the Supabase backend |
 | `.github/workflows/supabase-keepalive.yml` | Optional heartbeat so a free Supabase project is not paused |
+
+### Android app
+
+`android/` is a Gradle project (Android Gradle plugin 9.5.1, Gradle 9.9.1 wrapper, compileSdk and targetSdk 36, minSdk 29, package `io.github.shaslam.gyle`). The `webFiles` task in `app/build.gradle` copies the web files into `assets/www/`. `MainActivity` serves them to the WebView from `https://appassets.androidplatform.net/` through `shouldInterceptRequest`, so ES modules, localStorage, IndexedDB and the CSP work as on the website. Other hosts go to the network. Navigation to another host opens the phone's browser.
+
+- **Storage**: `store.init()` forces mode `supabase` when `native` is set, and Settings → Storage shows no mode buttons. The git backend is still in the bundle but nothing reaches it.
+- **Bridge**: `Bridge.java` is exposed as `window.GyleNative`: `saveFile`, `print`, `setAlarms`, `showAlert`, `notifyStatus`, `askToNotify`, `keepAwake`, `openExternal`. `js/native.js` documents the contract. Keep the two files in step.
+- **Timer alerts**: the WebView has no Notification API, and Android stops the page in the background. `plan()` in `timer.js` runs on every `save()` and hands the app the alerts still to come. `Alarms.java` keeps the list in SharedPreferences and sets one `setAlarmClock` alarm for the earliest. The page also raises each alert through `showAlert` while it is open. Both use the same key (`brewId|segment|endsAt|minutes or end`), and the app shows a key once.
+- **Sign-in links**: in the app `redirect_to` is `gyle://auth`. The manifest routes that link to `MainActivity`, which loads `index.html#<the link's fragment>`. The `hashchange` listener in `app.js` runs `arrive()`, so a page that is already open signs in.
+- **Files**: `onShowFileChooser` builds its own chooser. A request for images only also offers the camera, which writes into the cache through the `CameraFiles` provider. Downloads go to MediaStore Downloads.
+- **Insets**: from Android 11 the Activity draws edge to edge and sizes a green band (status bar) and a tan band (navigation bar or keyboard) itself. Android 10 uses the theme colours.
+- **Popups**: Stuart found Android's list for a `<select>` ugly (2026-11-13), so `js/picker.js` replaces it in the app. Date fields still open Android's date dialog, which the theme `Gyle.Dialog` styles as a cream panel with a green heading. Back first closes the top `dialog[open]` in the page (`CLOSE_POPUP` in `MainActivity`), then goes back in history.
+- In the windowed emulator, Google's keyboard can show a "Try out your stylus" sheet in place of the keys. The keyboard check of the device test then reports no change in page height. It passed with `-no-window`.
+- The WebView keeps the screen on while a debugger is attached. Read the `KEEP_SCREEN_ON` flag only with the debugger detached (the device test does this).
+
+The Android SDK is in `~/Android/Sdk` (installed 2026-11-13 with Stuart's approval, including the emulator and the AVD `gyle-test`, Android 16). Start it with `~/Android/Sdk/emulator/emulator -avd gyle-test -no-window -no-audio -no-snapshot -gpu swiftshader_indirect`.
+
+### iOS app
+
+`ios/` is an Xcode project written by hand on Linux (2026-11-13). **Nobody compiled it or ran it yet.** No Mac was available, so the Swift code had only a syntax check and a type check against hand-written stand-ins for Apple's frameworks. Treat the first real build as the first test, and expect to fix API details. `Gyle.xcodeproj` uses a synchronized folder (Xcode 16+, `objectVersion = 77`), so a new file in `ios/Gyle/` needs no project edit. `Info.plist`, `bridge.js` and `copy-web-files.sh` are outside that folder on purpose: Xcode would treat a `.js` file in it as source code, and a second Info.plist as a clash. Deployment target iOS 16.4 (`DecompressionStream` for the Brewfather import needs it), Swift 5 language mode, bundle id `io.github.shaslam.gyle`.
+
+- **Page address**: `WebFiles.swift` is a `WKURLSchemeHandler` for `gyle-app://local/`. It serves `www/` from the app bundle. When it serves `index.html` it adds `gyle-app:` after each `'self'` in the CSP, in case WebKit does not count the custom scheme as `'self'`.
+- **Bridge**: `ios/bridge.js` is a user script that runs at document start. It builds `GyleNative` with the same methods as Android plus `platform: 'ios'`. Methods with no answer go through `webkit.messageHandlers.gyle.postMessage({ name, args })`. `saveFile` and `notifyStatus` must answer at once, so they call `prompt('gyle-native', json)`, and `WebScreen` answers in the prompt delegate without showing anything. `Bridge.swift` does the work.
+- **Delegates use the `async` forms** (`decidePolicyFor`, the prompt panel, `willPresent`). The completion-handler forms changed their attributes between SDKs, and a method that "nearly matches" is silently never called. Calls to `UIApplication.open` and `evaluateJavaScript` stay in plain (not async) functions, because inside async code Swift picks their async overloads.
+- **Files**: no Downloads folder on iOS. `saveFile` writes to `tmp/export/`, then shows a PDF in `QLPreviewController` and any other file in the share sheet. The page shows no "Saved in Downloads" toast when `ios` is true. File and photo choosers are WKWebView's own (the camera needs `NSCameraUsageDescription`, which is set).
+- **Timer alerts**: `Alerts.swift` hands each alert to `UNUserNotificationCenter` with the alert key as the identifier. `planned` (key → time) and `shown` (keys) are in UserDefaults. `show()` skips a key that iOS already delivered, and replaces one that still waits. `set()` leaves alone an alert that is past its time.
+- **Layout**: a green band behind the status bar. The web view runs from the safe area's top to the bottom edge of the screen. `bridge.js` adds `viewport-fit=cover, maximum-scale=1` to the viewport, so `env(safe-area-inset-bottom)` works (the tab bar, `body` and `#toast` use it) and iOS does not zoom in on small fields. Scroll bounce is off.
+- **Sign-in links**: `gyle://auth` is in `CFBundleURLTypes`. `SceneDelegate` passes a link to `WebScreen.open(link:)`, which sets `location.hash` on the open page (or loads `index.html#…` at a cold start).
+- **Popups**: the same `js/picker.js` as Android. `open()` calls `sel.blur()` first, in case iOS opens its own list for a focused select.
+- `tests/browser/ios.py` needs Playwright's WebKit. On this machine WebKit lacked `libgstreamer-plugins-bad1.0-0` and there is no root access: the libraries from that package were copied into `~/.cache/ms-playwright/webkit-*/minibrowser-wpe/sys/lib/`, and the test runs with `PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1`.
 
 ### Storage model
 
@@ -104,7 +145,16 @@ Verified in a real browser against **simulated** services (see `tests/browser/`)
 sign-up/sign-in/refresh/sign-out/recovery, autosave, per-user isolation; GitHub connect,
 commit, conflict retry, delete; ThingSpeak fetch, hourly down-sampling, stable-gravity flag.
 
+Verified on the Android 16 emulator (WebView 133) with `tests/android/device.mjs`: start, sign-up and autosave against a simulated Supabase, export and PDF to Downloads, print screen, notification permission, exact alarm set and cancelled, an alert shown while the app process was stopped, no second copy of that alert on reopen, screen kept on, Back, `gyle://auth` sign-in, camera photo into the timeline and uploaded, recipe import from the file picker, keyboard resize.
+
+Verified in Playwright's WebKit 27.2 with `tests/browser/ios.py`: the website starts with no error, and the page with the real `ios/bridge.js` does sign-up, autosave, the Gyle popup for a select, export, brew sheet print and PDF, timer alarms and keys, and a sign-in link set through `location.hash`. The Swift side is a stand-in in that test.
+
 **Never run against the real thing, so expect teething problems:**
+
+- The whole iOS app: never compiled by Xcode, never run on a simulator or a phone. Unknowns to look at first: the build itself, `'self'` in the CSP under `gyle-app:`, localStorage and IndexedDB under that scheme, `env(safe-area-inset-bottom)`, whether `mousedown` `preventDefault` stops the iOS select list, print layout from `viewPrintFormatter()`, and alert timing.
+- The Android app on a real phone, and on Android 10 to 15 (only the Android 16 emulator was used).
+- The Android app against the real Supabase project. `gyle://auth` must be added to the project's Redirect URLs for email links and GitHub/Google sign-in to return to the app.
+- Timer alarms on a phone with a maker's battery saver (the emulator has none), and the alarm after a restart of the phone.
 
 - `supabase/setup.sql` has never been executed on a real project.
 - Supabase Auth and REST calls (endpoint shapes, publishable-key behaviour, error formats).
@@ -144,5 +194,5 @@ All four ingredient lists (fermentables, hops, yeast, other additions) now use c
 
 "Beer mats on kraft board": tan background, cream panels with a printed keyline, bottle-green
 header and tab bar, amber primary buttons, slab display type. Every beer gets a pint glass
-filled with its calculated colour; the timer drains a pint. He asked for smaller type and less
+filled with its calculated colour; the timer drains a pint. The actions under a recipe and a brew log are one row of icon buttons with short labels (`tile()` and `ICONS` in `app.js`), because he found the rows of text buttons messy (2026-11-13). Export asks for the format in a popup. A brew starts from a recipe, or from **Brew again** on a brew log: the Brews page has no start control. He asked for smaller type and less
 green/less dark than earlier versions, so keep it light and do not enlarge headings.

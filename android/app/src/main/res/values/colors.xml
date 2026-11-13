@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The same colours as the tokens at the top of css/app.css. -->
+<resources>
+    <color name="wall">#DCC9A0</color>
+    <color name="green">#0F3A2B</color>
+    <color name="green_deep">#09271D</color>
+    <color name="gold">#EAA21A</color>
+    <color name="cream">#FAF4E4</color>
+</resources>

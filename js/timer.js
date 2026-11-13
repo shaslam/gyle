@@ -6,6 +6,8 @@
 // A timer is a list of segments (mash steps, the boil, a whirlpool stand):
 //   { name, min, alerts: [{ at: minutes remaining, text }] }
 
+import { native } from './native.js';
+
 const KEY = 'gyle.timer.v1';
 const PREFS = 'gyle.timer.prefs.v1';
 const read = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
@@ -16,7 +18,7 @@ const prefs = { wake: true, ...read(PREFS, {}) };
 const listeners = new Set();
 let audio = null, wakeLock = null, swReg = null;
 
-const save = () => write(KEY, state);
+const save = () => { write(KEY, state); plan(); };
 const emit = (kind, payload) => listeners.forEach(fn => fn(kind, payload));
 
 // ---- ways of getting your attention ----
@@ -48,7 +50,8 @@ async function serviceWorker() {
     return swReg;
   } catch { return null; }
 }
-async function notify(title, body) {
+async function notify(title, body, key) {
+  if (native) { try { native.showAlert(key || `now|${Date.now()}`, title, body); } catch { /* sound and the on-screen alert remain */ } return; }
   try {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     const opts = { body, tag: 'gyle-timer', renotify: true, requireInteraction: true };
@@ -57,7 +60,9 @@ async function notify(title, body) {
   } catch { /* fall back to sound and the on-screen alert */ }
 }
 async function acquireWake() {
-  if (!prefs.wake || !state?.endsAt || wakeLock || !('wakeLock' in navigator)) return;
+  if (!prefs.wake || !state?.endsAt || wakeLock) return;
+  if (native) { native.keepAwake(true); wakeLock = { release: () => native.keepAwake(false) }; return; }
+  if (!('wakeLock' in navigator)) return;
   try {
     wakeLock = await navigator.wakeLock.request('screen');
     wakeLock.addEventListener('release', () => { wakeLock = null; });
@@ -65,33 +70,56 @@ async function acquireWake() {
 }
 function releaseWake() { try { wakeLock?.release(); } catch { /* already gone */ } wakeLock = null; }
 
-function fire(title, body) {
+function fire(title, body, key) {
   beep();
   try { navigator.vibrate?.([300, 150, 300, 150, 300]); } catch { /* not allowed */ }
-  notify(title, body);
+  notify(title, body, key);
   emit('alert', { title, body });
 }
+
+// In the Android and iOS apps the page stops when the phone is locked, so the app itself shows the alerts.
+// It gets the list of alerts still to come each time the timer changes. Each alert has a key, and
+// the app shows a key once only: an alert that the app and this page both raise appears one time.
+const alertKey = at => `${state.brewId}|${state.seg}|${state.endsAt}|${at}`;
+function plan() {
+  if (!native) return;
+  const list = [];
+  if (state?.endsAt) {
+    const seg = state.segments[state.seg], next = state.segments[state.seg + 1];
+    const before = new Map(), atEnd = [];
+    seg.alerts.forEach((a, j) => {
+      if (state.fired[`${state.seg}:${j}`]) return;
+      if (a.at > 0) before.set(a.at, [...(before.get(a.at) || []), a.text]); else atEnd.push(a.text);
+    });
+    for (const [at, texts] of before) list.push({ key: alertKey(at), at: state.endsAt - at * 60000, title: `${seg.name}: ${at} min left`, body: texts.join('. ') });
+    list.push({ key: alertKey('end'), at: state.endsAt, title: `${seg.name} finished`, body: atEnd.join('. ') || (next ? `Next: ${next.name}` : 'All timed steps are done') });
+  }
+  try { native.setAlarms(JSON.stringify(list.filter(x => x.at > Date.now()))); } catch { /* alerts still show while the app is open */ }
+}
+plan(); // a timer that was running when the app closed
+if (native) acquireWake();
 
 function tick() {
   if (!state?.endsAt) return;
   const rem = state.endsAt - Date.now();
   const seg = state.segments[state.seg];
-  const due = [];
+  const due = [], ats = [];
   seg.alerts.forEach((a, j) => {
     const k = `${state.seg}:${j}`;
-    if (!state.fired[k] && rem <= a.at * 60000) { state.fired[k] = 1; due.push(a.text); }
+    if (!state.fired[k] && rem <= a.at * 60000) { state.fired[k] = 1; due.push(a.text); ats.push(a.at); }
   });
   if (rem <= 0) {
+    const key = alertKey('end');
     state.endsAt = null; state.remaining = 0; state.done = true;
     save(); releaseWake();
     const next = state.segments[state.seg + 1];
-    fire(`${seg.name} finished`, due.join('. ') || (next ? `Next: ${next.name}` : 'All timed steps are done'));
+    fire(`${seg.name} finished`, due.join('. ') || (next ? `Next: ${next.name}` : 'All timed steps are done'), key);
     emit('change');
     return;
   }
   if (due.length) {
     save();
-    fire(`${seg.name}: ${Math.round(rem / 60000)} min left`, due.join('. '));
+    fire(`${seg.name}: ${Math.round(rem / 60000)} min left`, due.join('. '), alertKey(Math.min(...ats)));
     emit('change');
   }
   emit('tick');
@@ -99,6 +127,12 @@ function tick() {
 setInterval(tick, 500);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') { tick(); acquireWake(); }
+});
+
+// An app sends this event when the person answered its question about notifications.
+if (native) window.addEventListener('gyle-notify', () => {
+  if (timer.notifyStatus() === 'granted') notify('Gyle notifications are on', 'You will be told when a step ends or a hop addition is due.');
+  emit('change');
 });
 
 export const timer = {
@@ -145,9 +179,10 @@ export const timer = {
 
   setWake(on) { prefs.wake = !!on; write(PREFS, prefs); if (on) acquireWake(); else releaseWake(); },
   // 'granted' | 'denied' | 'default' (not asked yet) | 'unsupported'
-  notifyStatus() { try { return 'Notification' in window ? Notification.permission : 'unsupported'; } catch { return 'unsupported'; } },
+  notifyStatus() { try { return native ? native.notifyStatus() : 'Notification' in window ? Notification.permission : 'unsupported'; } catch { return 'unsupported'; } },
   async askToNotify() {
     unlockAudio();
+    if (native) { native.askToNotify(); return; } // the answer arrives as a 'gyle-notify' event, below
     try {
       const p = await Notification.requestPermission();
       if (p === 'granted') { await serviceWorker(); notify('Gyle notifications are on', 'You will be told when a step ends or a hop addition is due.'); }

@@ -1,0 +1,10 @@
+# Build output and files that belong to one machine.
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+# Signing keys must never be in this public repo.
+*.jks
+*.keystore
+keystore.properties

@@ -9,6 +9,7 @@ import { toBeerJSON, fromBeerJSON } from './beerjson.js';
 import { GitBackend } from './backend-git.js';
 import { SupabaseBackend } from './backend-supabase.js';
 import { photos } from './photos.js';
+import { native } from './native.js';
 
 const LS_CACHE = 'gyle.cache.v1';
 const LS_MODE = 'gyle.storage.v1';
@@ -33,6 +34,7 @@ class Store {
   #persistTimer = null;
   #autoTimer = null;
   #busy = false;
+  lastSync = 0; // when the backend was last asked for changes
 
   init() {
     const cached = ls.get(LS_CACHE);
@@ -40,6 +42,7 @@ class Store {
     const saved = ls.get(LS_MODE);
     if (saved) { this.mode = saved.mode || 'local'; this.owner = saved.owner || 'local'; }
     else if (this.git.ready) { this.mode = 'git'; this.owner = this.git.id; } // connections made before storage choices existed
+    if (native) this.mode = 'supabase'; // the Android and iOS apps keep data in a Gyle account only
     this.status.state = this.connected ? 'idle' : 'local';
   }
 
@@ -143,6 +146,7 @@ class Store {
     this.adopt();
     const backend = this.backend;
     this.#busy = true;
+    this.lastSync = Date.now();
     this.#setStatus('syncing');
     try {
       for (const kind of KINDS) {

@@ -93,6 +93,10 @@ js/pdf.js           a small PDF writer for the brew sheet
 fonts/              the web fonts, served from this site
 js/app.js           the screens
 sw.js               service worker, only so Android can show timer notifications
+js/native.js        what the Android and iOS apps add to the page (nothing in a browser)
+js/picker.js        Gyle's own popup for dropdown lists, used in the two apps
+android/            the Android app: a small shell around these same web files
+ios/                the iOS app: the same idea for iPhone and iPad
 ```
 
 A few things BeerJSON has no field for are stored under `x_` keys in the recipe
@@ -130,12 +134,21 @@ links under the recipe name (v1, v2, v3) open the other versions. An older versi
 so at the top. If you delete the newest version, the one before it takes its place in
 the brew queue.
 
-To start a different beer from an existing one, press **New recipe from this**, or
+To start a different beer from an existing one, press **Copy** under the recipe, or
 **New recipe** on the recipe list and choose a recipe under "Start from". The new recipe
 must have a name of its own: no two recipes can share a name, except the versions of one
 recipe. Renaming a version renames all its versions, and an imported recipe whose name is
 already in use gets a number added ("Best Bitter 2"). It starts as a copy at version 1 and links back to the
 recipe it was based on.
+
+## Starting a brew
+
+Open a recipe and press **Brew this recipe**. The brew log keeps a snapshot of the recipe
+as it is at that moment. To brew the same beer again, open an earlier brew log and press
+**Brew again**. The new log uses the newest version of the recipe as it is now. If the
+recipe was deleted, the new log uses the snapshot in the earlier log.
+
+Under a recipe, **Export** asks for the format (BeerJSON or BeerXML) and saves the file.
 
 ## Brew days
 
@@ -174,6 +187,9 @@ parts of the app. While the timer runs, the browser tab title shows the time lef
 Browsers stop web pages when the phone is locked, so alerts only fire while the app is
 open: leave "Keep the screen on" ticked on brew day. On iPhone, notifications need the
 app added to the Home Screen first (Share → Add to Home Screen).
+
+The Android app and the iOS app do not have this limit. They show each alert as a
+notification at the exact time, also when the app is closed or the phone is locked.
 
 ## Photos, timeline and pump clip
 
@@ -283,8 +299,157 @@ change those hops to whirlpool.
 Everything is metric (litres, kg, g, °C, EBC). Style ranges are BJCP 2021 and the
 ingredient values in `js/data.js` are typical figures: edit that file to match what you buy.
 
+## Android app
+
+The folder `android/` holds an Android app with the same screens as the website. The app
+packs the web files into itself and shows them in a WebView. A WebView is the Android
+part that draws web pages inside an app. The app has every feature of the website, with
+these differences:
+
+- The app keeps your data in a Gyle account (Supabase) only. It has no GitHub repo choice.
+  It uses the project in `js/config.js`.
+- Timer alerts are Android notifications. They arrive when the app is closed or the phone is locked.
+- Exports and the brew sheet PDF go to the Downloads folder of the phone.
+- **Add photos** offers the camera and the photo picker.
+- The app looks for changes in your account each time you come back to it.
+- A dropdown list opens a Gyle popup, not Android's own list. The Back button closes a popup.
+
+The app needs Android 10 or later.
+
+### Build and install
+
+You need a JDK (version 17 or later) and the Android SDK with platform 36.
+
+1. Create the file `android/local.properties` with one line: `sdk.dir=/path/to/your/Android/Sdk`.
+2. Connect the phone by USB, with USB debugging on.
+3. In `android/`, run `./gradlew installDebug`.
+
+Without a USB connection, run `./gradlew assembleDebug` instead. Then copy
+`android/app/build/outputs/apk/debug/app-debug.apk` to the phone and open it there.
+
+The build copies `index.html`, `css/`, `js/`, `fonts/` and the example recipe into the app.
+The app does not change when the website changes. After a change to the web files, build
+and install the app again.
+
+Android installs an update only over an app that has the same signing key. A debug build
+uses the key that the Android tools made on your computer (`~/.android/debug.keystore`). If
+you build on a second computer, copy that file to it, or uninstall the app before you
+install the new build.
+
+For a release build with your own key, create `android/keystore.properties` with the lines
+`storeFile=`, `storePassword=`, `keyAlias=` and `keyPassword=`. Then run
+`./gradlew assembleRelease`. Git ignores this file and all key files. Never commit a key to
+a public repo.
+
+### Sign-in links
+
+In Supabase, open **Authentication → URL Configuration** and add `gyle://auth` to the
+Redirect URLs. Then the links in confirmation and password-reset emails open the app, and
+GitHub or Google sign-in returns to the app.
+
+Without this entry, Supabase sends those links to the Site URL, which is the website. You
+can then confirm the address or set the new password on the website, and sign in to the
+app with your email and password. Sign-in with email and password does not need this entry.
+
+### What is in `android/`
+
+```
+app/build.gradle                 the build, and the list of web files that go into the app
+app/src/main/AndroidManifest.xml permissions, the gyle://auth link, backups off
+.../gyle/MainActivity.java       the one screen: serves the web files to the page, file chooser and camera, sign-in links, Back
+.../gyle/Bridge.java             what the page can ask the app to do (the page calls it GyleNative)
+.../gyle/Alarms.java             timer alerts while the app is closed
+.../gyle/AlarmReceiver.java      runs when an alarm is due, and after a restart of the phone
+.../gyle/CameraFiles.java        gives the camera app a file to write a photo into
+```
+
+The app has no libraries. `js/native.js` is the page's side of the same list of functions.
+
+## iOS app
+
+The folder `ios/` holds an app for iPhone and iPad with the same screens as the website.
+It works like the Android app: it packs the web files into itself and shows them in a web
+view. It has every feature of the website, with these differences:
+
+- The app keeps your data in a Gyle account (Supabase) only. It has no GitHub repo choice.
+  It uses the project in `js/config.js`.
+- Timer alerts are iOS notifications. They arrive when the app is closed or the phone is locked.
+- iOS has no shared Downloads folder. An export opens the share sheet, where **Save to Files**
+  keeps the file. The brew sheet PDF opens in a viewer that can also print and share it.
+- **Add photos** offers the camera, the photo library and the Files app.
+- The app looks for changes in your account each time you come back to it.
+- A dropdown list opens a Gyle popup, not the iOS list. A swipe from the left edge of the
+  screen goes back.
+
+The app needs iOS 16.4 or later.
+
+This app was written on a computer that cannot build iOS apps. The page's side passes its
+tests in WebKit, the engine that iOS uses. Nobody built the Swift code or ran the app on a
+phone yet, so expect some errors on the first build.
+
+### Build and install
+
+You need a Mac with Xcode 16 or later, and an Apple ID.
+
+1. Open `ios/Gyle.xcodeproj` in Xcode.
+2. Select the target **Gyle**, open **Signing & Capabilities** and choose your team.
+3. Connect the iPhone and choose it as the place to run the app.
+4. Press **Run**.
+
+The first time, the iPhone asks you to turn on Developer Mode (**Settings → Privacy &
+Security**) and to trust your developer certificate (**Settings → General → VPN & Device
+Management**).
+
+With a free Apple ID, the app stops after 7 days. Then press **Run** again. Your data is
+safe, because it is in your Gyle account. With the paid Apple Developer Program, the app
+works for a year and you can send it to a phone through TestFlight.
+
+Xcode writes your team ID into `project.pbxproj`. You do not need to commit that change.
+
+The build runs `ios/copy-web-files.sh`, which copies `index.html`, `css/`, `js/`, `fonts/`
+and the example recipe into the app. The app does not change when the website changes.
+After a change to the web files, build and install the app again.
+
+Without a Mac, you can still find out if the Swift code compiles. The workflow
+`.github/workflows/ios-build.yml` builds the app on GitHub for the iPhone simulator. It
+cannot put the app on a phone.
+
+### Sign-in links
+
+The iOS app uses the same link as the Android app. Add `gyle://auth` to the Redirect URLs
+in Supabase one time, as the Android section describes. That entry serves the two apps.
+
+### Timer alerts
+
+An alert is a normal iOS notification with the standard sound. iOS plays no sound when the
+phone is in silent mode, and a Focus can hide the notification. To let alerts through a
+Focus, add the capability **Time Sensitive Notifications** to the target in Xcode. The code
+already marks each alert as time sensitive.
+
+### What is in `ios/`
+
+```
+Gyle.xcodeproj/        the Xcode project. It takes in every file in Gyle/ by itself
+Info.plist             the gyle://auth link, the camera question, screen directions
+copy-web-files.sh      copies the web files into the app on every build
+bridge.js              gives the page its GyleNative object, and sends each call to the app
+Gyle/App.swift         the start of the app and its one window
+Gyle/WebScreen.swift   the one screen: the web view, sign-in links, links to Safari
+Gyle/WebFiles.swift    serves the packed web files to the page
+Gyle/Bridge.swift      what the page can ask the app to do: files, print, screen on
+Gyle/Alerts.swift      timer alerts while the app is closed
+Gyle/Assets.xcassets/  the app icon and the colour of the start screen
+```
+
+The app has no libraries.
+
 ## Tests
 
 ```
-node tests/calc.test.mjs
+node tests/calc.test.mjs           # brewing maths, BeerJSON round trip, water and mash pH
+python3 tests/browser/native.py    # the web files as the Android app runs them, with a stand-in for the app
+python3 tests/browser/ios.py       # the web files as the iOS app runs them, in WebKit, with a stand-in for the app
+node tests/android/device.mjs      # the Android app on an emulator, against a simulated Supabase
 ```
+
+The header of each file in `tests/browser/` and `tests/android/` lists what it needs.

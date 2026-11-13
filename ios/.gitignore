@@ -1,0 +1,10 @@
+# Build output and files that belong to one person or one machine.
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.ipa
+# Signing files must never be in this public repo.
+*.mobileprovision
+*.p12
+*.cer

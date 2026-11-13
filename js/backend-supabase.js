@@ -4,9 +4,12 @@
 // Same shape as the git backend (see backend-git.js). Database setup is in supabase/setup.sql.
 
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
+import { native, APP_LINK } from './native.js';
 
 const LS = 'gyle.supabase.v1';
 const read = () => { try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch { return {}; } };
+// Where a sign-in link brings the person back to: this page, or the Android or iOS app.
+const comeBack = () => encodeURIComponent(native ? APP_LINK : location.origin + location.pathname);
 
 export class SupabaseBackend {
   auto = true; // changes save themselves a moment after you stop typing
@@ -66,8 +69,7 @@ export class SupabaseBackend {
   }
   // Resolves 'signed-in', or 'confirm' when the project wants the email address confirmed first.
   async signUp(email, password) {
-    const redirect = encodeURIComponent(location.origin + location.pathname);
-    const out = await this.#fetch(`/auth/v1/signup?redirect_to=${redirect}`, { method: 'POST', body: { email, password } });
+    const out = await this.#fetch(`/auth/v1/signup?redirect_to=${comeBack()}`, { method: 'POST', body: { email, password } });
     if (out?.access_token) { this.#setSession(out); return 'signed-in'; }
     return 'confirm';
   }
@@ -79,10 +81,11 @@ export class SupabaseBackend {
   }
   // Send the browser to GitHub, Google etc. The provider must be switched on in the Supabase project.
   oauth(provider) {
-    location.href = `${this.url}/auth/v1/authorize?provider=${encodeURIComponent(provider)}&redirect_to=${encodeURIComponent(location.origin + location.pathname)}`;
+    const go = `${this.url}/auth/v1/authorize?provider=${encodeURIComponent(provider)}&redirect_to=${comeBack()}`;
+    if (native) native.openExternal(go); else location.href = go; // the app signs in through the phone's browser
   }
   async recover(email) {
-    await this.#fetch(`/auth/v1/recover?redirect_to=${encodeURIComponent(location.origin + location.pathname)}`, { method: 'POST', body: { email } });
+    await this.#fetch(`/auth/v1/recover?redirect_to=${comeBack()}`, { method: 'POST', body: { email } });
   }
   async setPassword(password) {
     await this.#fetch('/auth/v1/user', { method: 'PUT', body: { password }, token: await this.#token() });

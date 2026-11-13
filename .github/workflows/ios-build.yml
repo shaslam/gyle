@@ -1,0 +1,34 @@
+# Builds the iOS app (ios/) for the simulator on one of GitHub's Macs, to make sure that the
+# Swift code compiles. It signs nothing and it puts nothing on a phone.
+#
+# It runs when a push changes a file under ios/. To start it by hand: Actions -> iOS build ->
+# Run workflow.
+name: iOS build
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build for the simulator
+        run: |
+          xcodebuild -version
+          xcodebuild -project ios/Gyle.xcodeproj -target Gyle -configuration Debug \
+            -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build
+      - name: Make sure that the web files are in the app
+        run: |
+          app=ios/build/Debug-iphonesimulator/Gyle.app
+          ls "$app"
+          test -f "$app/www/index.html"
+          test -f "$app/www/js/app.js"
+          test -f "$app/bridge.js"

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Gyle</string>
+    <string name="channel_timer">Timer alerts</string>
+    <string name="channel_timer_about">A step ended or an addition is due on brew day.</string>
+    <string name="saved_failed">Could not save the file: %1$s</string>
+    <string name="no_browser">There is no app on this phone to open that link.</string>
+</resources>
