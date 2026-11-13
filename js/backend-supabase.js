@@ -7,6 +7,8 @@ import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { native, APP_LINK } from './native.js';
 
 const LS = 'gyle.supabase.v1';
+const LS_PROVIDERS = 'gyle.supabase.providers';
+const OFFERED = ['github', 'google']; // the sign-in services Gyle has buttons for
 const read = () => { try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch { return {}; } };
 // Where a sign-in link brings the person back to: this page, or the Android or iOS app.
 const comeBack = () => encodeURIComponent(native ? APP_LINK : location.origin + location.pathname);
@@ -78,6 +80,22 @@ export class SupabaseBackend {
     this.#state.session = null; this.recovering = false;
     this.#save();
     if (token) await this.#fetch('/auth/v1/logout', { method: 'POST', token }).catch(() => {});
+  }
+  // The sign-in services that are switched on in the Supabase project, as last seen. A button for
+  // a service that is off only leads to an error page, so the forms show these and no others.
+  get providers() {
+    try { return (JSON.parse(localStorage.getItem(LS_PROVIDERS)) || []).filter(p => OFFERED.includes(p)); } catch { return []; }
+  }
+  // Ask the project which services are on. Resolves true when the answer changed.
+  async loadProviders() {
+    if (!this.configured) return false;
+    try {
+      const on = (await this.#fetch('/auth/v1/settings')).external || {};
+      const list = OFFERED.filter(p => on[p]);
+      if (JSON.stringify(list) === JSON.stringify(this.providers)) return false;
+      localStorage.setItem(LS_PROVIDERS, JSON.stringify(list));
+      return true;
+    } catch { return false; } // offline: keep what was seen last time
   }
   // Send the browser to GitHub, Google etc. The provider must be switched on in the Supabase project.
   oauth(provider) {

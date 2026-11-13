@@ -21,6 +21,8 @@ const until = async (fn, ms = 15000, step = 300) => { for (const end = Date.now(
 
 // ---- a simulated Supabase: sign-in, the documents table and the photos bucket ----
 const users = {}, tokens = {}, rows = new Map(), files = new Set(), log = [];
+// The account already holds one recipe. The demo of the app must not add to it.
+rows.set('recipes/house-pale-ale', { data: JSON.parse(readFileSync(new URL('../../recipes/house-pale-ale.json', import.meta.url), 'utf8')), updated_at: 'v0' });
 let n = 0;
 const session = (uid, email) => { n++; tokens[`at${n}`] = uid; return { access_token: `at${n}`, refresh_token: `rt${n}`, expires_in: 3600, token_type: 'bearer', user: { id: uid, email } }; };
 function supabase(req) {
@@ -32,6 +34,7 @@ function supabase(req) {
   if (path === '/auth/v1/signup') { users[body.email] = { id: 'u1', password: body.password }; return [200, session('u1', body.email)]; }
   if (path === '/auth/v1/token') return users[body.email]?.password === body.password ? [200, session('u1', body.email)] : [400, { error_code: 'invalid_credentials', msg: 'Invalid login credentials' }];
   if (path === '/auth/v1/logout') return [204, null];
+  if (path === '/auth/v1/settings') return [200, { external: { email: true, github: false, google: false } }];
   const auth = Object.entries(req.headers).find(([k]) => k.toLowerCase() === 'authorization')?.[1] || '';
   const uid = tokens[auth.replace('Bearer ', '')];
   if (!uid) return [401, { msg: 'bad jwt' }];
@@ -124,16 +127,21 @@ const windows = () => (sh('dumpsys window windows').match(new RegExp(`^\\s*Windo
 sh('cmd connectivity airplane-mode enable');
 sh(`pm clear ${PKG}`); sh('rm -f /sdcard/Download/house-pale-ale*'); sh('cmd notification set_dnd off 2>/dev/null; true');
 start(); await attach(); await sleep(1500);
-console.log('1 app starts: chip', await chip(), '| recipes', await js("[...document.querySelectorAll('#recipe-list strong')].map(x => x.textContent).join()"),
+const recipes = () => js("[...document.querySelectorAll('#recipe-list strong')].map(x => x.textContent).join()");
+const cards = () => js("[...document.querySelectorAll('#view .card h2')].map(x => x.textContent).join(' / ')");
+const shown = sel => js(`(e => !!e && !e.hidden && getComputedStyle(e).display !== 'none')(document.querySelector('${sel}'))`);
+console.log('1 app starts:', await text('#view h1'), '|', await cards(), '| tab bar', await shown('#tabs'), '| other sign-in buttons', await js("document.querySelectorAll('#sb-providers button').length"),
   '| page', await js('location.origin'), '| bridge', await js("Object.keys(window.GyleNative || {}).length"), 'methods | wider than the screen:', await js('document.documentElement.scrollWidth > innerWidth'));
+await tap('[data-act=demo]'); await sleep(1200);
+console.log('  the demo: chip', await chip(), '| strip', await shown('#demo-bar'), '| recipes', await recipes(), '| brews', await js("Object.keys(JSON.parse(localStorage.getItem('gyle.cache.v1')).brews).length"));
 
-await go('#settings/storage');
-console.log('2 storage: mode buttons', await js("document.querySelectorAll('#storage .seg').length"), '| GitHub fields', await js("document.querySelectorAll('#gh-repo').length"));
+await tap('#demo-bar'); await sleep(800);
+console.log('2 from the demo strip:', await cards(), '| mode buttons', await js("document.querySelectorAll('#storage .seg').length"), '| GitHub fields', await js("document.querySelectorAll('#gh-repo').length"));
 await js("document.querySelector('#sb-email').value = 'stu@example.com'; document.querySelector('#sb-password').value = 'hunter22'");
-await click('[data-act=sb-signup]'); await sleep(2000);
-console.log('  signed up:', await text('#storage .summary'), '|', await text('#storage-msg'), '| came back to:', decodeURIComponent(log.find(l => l.includes('signup')).split('redirect_to=')[1]));
-await until(async () => rows.size > 0 && await chip() === 'In sync', 8000);
-console.log('  autosave: chip', await chip(), '| rows', [...rows.keys()].join());
+await click('[data-act=sb-signup]'); await sleep(2500);
+console.log('  signed up: toast', await text('#toast'), '| recipes', await recipes(), '| strip', await shown('#demo-bar'), '| came back to:', decodeURIComponent(log.find(l => l.includes('signup')).split('redirect_to=')[1]));
+await until(async () => await chip() === 'In sync', 8000);
+console.log('  the demo stayed out of the account: chip', await chip(), '| rows', [...rows.keys()].join());
 
 await go('#recipe/house-pale-ale'); await click('[data-act=export]'); await sleep(400); await click('dialog.sheet [data-fmt=json]'); await sleep(1500);
 console.log('3 export: toast', await text('#toast'), '| in Downloads:', sh('ls /sdcard/Download/').trim().split('\n').join(), '| BeerJSON:', sh('cat /sdcard/Download/house-pale-ale.json').includes('"beerjson"'));
@@ -180,7 +188,7 @@ console.log('  Back with a popup open: popup gone', await js("!document.querySel
 await go(brew); await tap('input[type=date]'); await sleep(2000);
 console.log('  a date field opens Android\'s dialog: app windows', windows()); sh('input keyevent BACK'); await sleep(800);
 await go('#settings/storage'); await click('[data-act=sb-signout]'); await sleep(1500);
-console.log('  signed out: chip', await chip());
+console.log('  signed out:', await text('#view h1'), '|', await cards());
 const s = session('u1', 'stu@example.com');
 sh(`am start -W -a android.intent.action.VIEW -d 'gyle://auth#access_token=${s.access_token}&refresh_token=${s.refresh_token}&expires_in=3600&token_type=bearer'`);
 await sleep(3000);
@@ -207,7 +215,8 @@ console.log('  imported:', await js('location.hash'), '| toast', await text('#to
 
 // The keyboard, and Back on the first screen. In an emulator with a window, Google's keyboard can show
 // its stylus tutorial in place of the keys, and then the page height does not change.
-await go('#recipes'); const tall = await js('innerHeight'); await tap('#q'); await sleep(2500);
+// The first keyboard after a start of the emulator can take some seconds to appear.
+await go('#recipes'); const tall = await js('innerHeight'); await tap('#q'); await until(async () => await js('innerHeight') < tall, 10000, 500);
 console.log('9 keyboard: page height', tall, '->', await js('innerHeight'), '| tab bar still on screen:', await js("document.querySelector('#tabs').getBoundingClientRect().bottom <= innerHeight + 1"));
 sh('input keyevent BACK'); await sleep(800);
 ws.close(); sh(`am force-stop ${PKG}`); start(); await attach(); await sleep(1000); ws.close();

@@ -29,6 +29,7 @@ class Store {
   account = new SupabaseBackend();
   mode = 'local';   // 'local' | 'git' | 'supabase'
   owner = 'local';  // which backend the working copy was last in step with
+  demo = false;     // the working copy is the demo of the apps (js/demo.js): it never goes to a backend
   status = { state: 'local', message: '' };
   #listeners = new Set();
   #persistTimer = null;
@@ -40,7 +41,7 @@ class Store {
     const cached = ls.get(LS_CACHE);
     if (cached) for (const k of KINDS) this.docs[k] = cached[k] || {};
     const saved = ls.get(LS_MODE);
-    if (saved) { this.mode = saved.mode || 'local'; this.owner = saved.owner || 'local'; }
+    if (saved) { this.mode = saved.mode || 'local'; this.owner = saved.owner || 'local'; this.demo = !!saved.demo; }
     else if (this.git.ready) { this.mode = 'git'; this.owner = this.git.id; } // connections made before storage choices existed
     if (native) this.mode = 'supabase'; // the Android and iOS apps keep data in a Gyle account only
     this.status.state = this.connected ? 'idle' : 'local';
@@ -59,7 +60,7 @@ class Store {
   #emit() { this.#listeners.forEach(fn => fn()); }
   #setStatus(state, message = '') { this.status = { state, message }; this.#emit(); }
   persist() { ls.set(LS_CACHE, this.docs); }
-  #saveMode() { ls.set(LS_MODE, { mode: this.mode, owner: this.owner }); }
+  #saveMode() { ls.set(LS_MODE, { mode: this.mode, owner: this.owner, ...(this.demo ? { demo: true } : {}) }); }
 
   // ---- choosing where data lives ----
   setMode(mode) {
@@ -69,9 +70,15 @@ class Store {
   }
   // Call after connecting a repo or signing in. If the working copy belonged somewhere else (this
   // device only, another repo, the other kind of backend), everything in it is queued to be saved
-  // to the new place, so moving between backends carries your recipes with you.
+  // to the new place, so moving between backends carries your recipes with you. The demo is the
+  // exception: it is removed, so example recipes never get into a person's account.
   adopt() {
     if (!this.connected || this.owner === this.backend.id) return;
+    if (this.demo) {
+      this.docs = { recipes: {}, brews: {}, settings: {} };
+      this.demo = false;
+      photos.wipe();
+    }
     for (const k of KINDS) {
       for (const [id, d] of Object.entries(this.docs[k])) {
         if (d.deleted) delete this.docs[k][id]; else { d.sha = undefined; d.dirty = true; }
@@ -85,9 +92,20 @@ class Store {
   wipe() {
     this.docs = { recipes: {}, brews: {}, settings: {} };
     this.owner = 'local';
+    this.demo = false;
     photos.wipe();
     this.persist(); this.#saveMode();
     this.#setStatus(this.connected ? 'idle' : 'local');
+  }
+  // Replace the working copy with the demo: { recipes: { id: data }, brews: { id: data } }.
+  startDemo(docs) {
+    this.wipe();
+    for (const kind of ['recipes', 'brews']) {
+      for (const [id, data] of Object.entries(docs[kind] || {})) this.docs[kind][id] = { data, dirty: true };
+    }
+    this.demo = true;
+    this.persist(); this.#saveMode();
+    this.#setStatus('local');
   }
   // Keep the working copy but stop syncing it anywhere.
   detach() {

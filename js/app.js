@@ -11,6 +11,7 @@ import { unzip } from './unzip.js';
 import { photos, shrink, newPhotoId } from './photos.js';
 import { native, ios } from './native.js';
 import { pickSelects } from './picker.js';
+import { demoData } from './demo.js';
 
 // ---------- helpers ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -2299,6 +2300,130 @@ const EQUIP_LABELS = {
   kettleLoss: 'Kettle loss L', mashLoss: 'Mash tun loss L', absorption: 'Absorption L/kg', mashRatio: 'Mash ratio L/kg', grainTemp: 'Grain temp °C',
 };
 
+// ---------- Gyle account sign-in ----------
+// One form and one set of actions, used by Settings → Storage and by the welcome screen of the
+// apps. `say` shows a message beside the form. `done` runs after a sign-in, with '' or the
+// problem that the first sync had.
+const PROVIDER_NAMES = { github: 'GitHub', google: 'Google' };
+const providerButtons = () => store.account.providers.map(p =>
+  `<button type="button" class="btn small" data-act="sb-oauth" data-v="${p}">Continue with ${PROVIDER_NAMES[p]}</button>`).join('');
+const projectFields = () => (store.account.builtIn ? '' : `<div class="row">
+    <label class="fld w-name" for="sb-url"><span>Supabase project URL</span><input id="sb-url" value="${esc(store.account.url)}" placeholder="https://xxxx.supabase.co" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+    <label class="fld w-name" for="sb-key"><span>Public (publishable or anon) key</span><input id="sb-key" value="${esc(store.account.key)}" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+  </div>`);
+let providersAsked = 0;
+function signInForm() {
+  // The form shows a button only for a sign-in service that the project has switched on. Ask the
+  // project again now and then, and redraw the buttons if the answer changed.
+  if (Date.now() - providersAsked > 60000) {
+    providersAsked = Date.now();
+    store.account.loadProviders().then(changed => { const el = $('#sb-providers'); if (changed && el) el.innerHTML = providerButtons(); });
+  }
+  return `<form id="sb-form" novalidate><div class="row">
+      <label class="fld w-name" for="sb-email"><span>Email</span><input id="sb-email" type="email" autocomplete="username" autocapitalize="off" spellcheck="false"></label>
+      <label class="fld w-name" for="sb-password"><span>Password</span><input id="sb-password" type="password" autocomplete="current-password"></label>
+    </div>
+    <div class="foot-actions"><button type="submit" class="btn primary">Sign in</button><button type="button" class="btn" data-act="sb-signup">Create account</button>
+      <button type="button" class="btn ghost" data-act="sb-recover">Forgot password</button></div></form>
+    <div class="foot-actions alt" id="sb-providers">${providerButtons()}</div>`;
+}
+function signInActions(say, done) {
+  const val = id => ($('#' + id)?.value ?? '').trim();
+  const projectReady = () => {
+    if (!store.account.builtIn) store.account.configure({ url: val('sb-url'), key: val('sb-key') });
+    if (!store.account.configured) { say('Enter the Supabase project URL and public key first.'); return false; }
+    return true;
+  };
+  async function signIn(create) {
+    if (!projectReady()) return;
+    const email = val('sb-email'), password = $('#sb-password')?.value || '';
+    if (!email || !password) return say('Enter your email address and a password.');
+    say(create ? 'Creating your account…' : 'Signing in…');
+    try {
+      if (create && await store.account.signUp(email, password) === 'confirm') {
+        return say('Check your email for a confirmation link, then come back here and sign in.');
+      }
+      if (!create) await store.account.signIn(email, password);
+      store.setMode('supabase');
+      await store.sync();
+      done(store.status.state === 'error' ? store.status.message : '');
+    } catch (e) { say(/invalid login/i.test(e.message) ? 'That email and password do not match an account.' : e.message); }
+  }
+  return {
+    signIn,
+    actions: {
+      'sb-signup': () => signIn(true),
+      'sb-oauth'(btn) {
+        if (!projectReady()) return;
+        store.setMode('supabase');
+        store.account.oauth(btn.dataset.v);
+      },
+      async 'sb-recover'() {
+        if (!projectReady()) return;
+        if (!val('sb-email')) return say('Enter your email address first, then press Forgot password.');
+        try { await store.account.recover(val('sb-email')); say('If that address has an account, a reset link is on its way. Open it on this device.'); } catch (e) { say(e.message); }
+      },
+    },
+  };
+}
+
+// ---------- welcome and demo (the apps only) ----------
+// An app keeps data in a Gyle account only, so a person who is not signed in can make nothing
+// that lasts. The welcome screen says so and offers the two ways on: sign in, or look around in
+// the demo. route() shows it for every address until the person chooses one.
+function loadDemo() {
+  store.wipe(); // so equipFor() below sees no settings from before
+  timer.clear();
+  const { recipes, brews } = demoData();
+  for (const b of Object.values(brews)) {
+    const r = recipes[b.recipeId], eq = clone(equipFor(r)), ticked = Math.round(brewSteps(r, eq).length * b.stepsDone);
+    Object.assign(b, { recipe: clone(r), equipment: eq, checklist: Object.fromEntries(Array.from({ length: ticked }, (_, i) => ['s' + i, true])) });
+    delete b.stepsDone;
+  }
+  store.startDemo({ recipes, brews });
+}
+function welcomeView() {
+  if (store.connected) return void go('#recipes');
+  const inDemo = store.demo;
+  const say = m => { const el = $('#storage-msg'); if (el) el.textContent = m; };
+  const account = signInActions(say, problem => { toast(problem || 'Signed in.', !!problem); go('#recipes'); });
+  ctx = {
+    actions: {
+      ...account.actions,
+      demo(btn) {
+        // Only after a sign-in that ran out can there be unsaved work here.
+        if (store.dirtyCount && !confirmTap(btn, 'Unsaved changes on this phone will be lost. Tap again')) return;
+        loadDemo();
+        toast('This is the demo. Nothing here is saved to an account.');
+        go('#recipes');
+      },
+      'demo-back': () => go('#recipes'),
+      'demo-reset'(btn) {
+        if (!confirmTap(btn, 'Tap again to start the demo again')) return;
+        loadDemo();
+        toast('The demo is as new again.');
+        go('#recipes');
+      },
+    },
+    submit(form) { if (form.id === 'sb-form') account.signIn(false); },
+  };
+  view.innerHTML = `
+    <div class="welcome-head">${pint('#eaa21a', 40)}<div><h1>Welcome to Gyle</h1><p>Recipes, brew logs and a brew-day timer for your homebrew.</p></div></div>
+    <section class="card" id="welcome-account">
+      <div class="sec-head"><h2>${inDemo ? 'Sign in to use Gyle' : 'Use Gyle'}</h2></div>
+      <p class="hint">Sign in, or create an account. Your recipes and brew logs are kept in your account, so they are the same on every phone and computer where you sign in.${inDemo ? ' Signing in removes the demo from this phone.' : ''}</p>
+      ${projectFields()}${signInForm()}
+      <p class="hint" id="storage-msg" role="status">${esc(store.status.state === 'error' ? store.status.message : '')}</p>
+    </section>
+    <section class="card" id="welcome-demo">
+      <div class="sec-head"><h2>${inDemo ? 'The demo' : 'Look around first'}</h2></div>
+      <p class="hint">${inDemo ? 'You are in the demo. It has example recipes and brew logs. Nothing in it is saved to an account.'
+        : 'Open the demo. It has example recipes and brew logs, and you can change anything. The demo stays on this phone, and it is removed when you sign in.'}</p>
+      <div class="foot-actions">${inDemo ? '<button type="button" class="btn primary" data-act="demo-back">Back to the demo</button><button type="button" class="btn ghost" data-act="demo-reset">Start the demo again</button>'
+        : '<button type="button" class="btn" data-act="demo">Open the demo</button>'}</div>
+    </section>`;
+}
+
 let storageNote = ''; // a message to show on the Storage card the next time Settings is drawn
 // Settings has one page per subject. The tab bar's Settings link opens the first one.
 const SETTINGS_PAGES = [['equipment', 'Equipment'], ['water', 'Water'], ['devices', 'Devices'], ['storage', 'Storage']];
@@ -2312,6 +2437,10 @@ function settingsView(sub) {
   doc.waters ??= [];
   doc.devices ??= [];
   const val = id => ($('#' + id)?.value ?? '').trim();
+  const account = signInActions(m => say(m), problem => {
+    storageNote = problem || 'Signed in. Changes now save to your account automatically.';
+    settingsView('storage');
+  });
   const touch = () => store.put('settings', 'settings', doc);
   const drawProfiles = () => {
     const inUse = id => store.list('recipes').filter(r => (r.data.equipment || doc.defaultProfile) === id).length;
@@ -2469,30 +2598,21 @@ function settingsView(sub) {
         storageMsg = 'Disconnected. Your recipes are still on this device.';
         drawStorage();
       },
-      async 'sb-signup'() { await signIn(true); },
-      'sb-oauth'(btn) {
-        if (!projectReady()) return;
-        store.setMode('supabase');
-        store.account.oauth(btn.dataset.v);
-      },
-      async 'sb-recover'() {
-        if (!projectReady()) return;
-        if (!val('sb-email')) return say('Enter your email address first, then press Forgot password.');
-        try { await store.account.recover(val('sb-email')); say('If that address has an account, a reset link is on its way. Open it on this device.'); } catch (e) { say(e.message); }
-      },
+      ...account.actions,
       async 'sb-signout'(btn) {
         if (store.dirtyCount) {
           try { await store.push(); } catch { if (!confirmTap(btn, 'Unsaved changes. Tap again to sign out anyway')) return; }
         }
         await store.account.signOut();
         store.wipe();
+        if (native) { toast('Signed out. Your recipes are in your account, no longer on this phone.'); return void route(); } // the welcome screen
         storageNote = 'Signed out. Your recipes are in your account, no longer on this device.';
         settingsView('storage');
       },
       'sb-sync': () => store.sync(),
     },
     submit(form) {
-      if (form.id === 'sb-form') signIn(false);
+      if (form.id === 'sb-form') account.signIn(false);
       if (form.id === 'sb-newpass') newPassword();
     },
   };
@@ -2500,27 +2620,6 @@ function settingsView(sub) {
   let storageMsg = storageNote || (store.status.state === 'error' ? store.status.message : '');
   storageNote = '';
   const say = m => { storageMsg = m; const el = $('#storage-msg'); if (el) el.textContent = m; };
-  const projectReady = () => {
-    if (!store.account.builtIn) store.account.configure({ url: val('sb-url'), key: val('sb-key') });
-    if (!store.account.configured) { say('Enter the Supabase project URL and public key first.'); return false; }
-    return true;
-  };
-  async function signIn(create) {
-    if (!projectReady()) return;
-    const email = val('sb-email'), password = $('#sb-password')?.value || '';
-    if (!email || !password) return say('Enter your email address and a password.');
-    say(create ? 'Creating your account…' : 'Signing in…');
-    try {
-      if (create && await store.account.signUp(email, password) === 'confirm') {
-        return say('Check your email for a confirmation link, then come back here and sign in.');
-      }
-      if (!create) await store.account.signIn(email, password);
-      store.setMode('supabase');
-      await store.sync();
-      storageNote = store.status.state === 'error' ? store.status.message : 'Signed in. Changes now save to your account automatically.';
-      settingsView('storage');
-    } catch (e) { say(/invalid login/i.test(e.message) ? 'That email and password do not match an account.' : e.message); }
-  }
   async function newPassword() {
     const pw = $('#sb-new')?.value || '';
     if (pw.length < 8) return say('Use at least 8 characters.');
@@ -2542,23 +2641,14 @@ function settingsView(sub) {
       <div class="foot-actions"><button type="button" class="btn primary" data-act="connect">Connect and sync</button>${store.git.ready ? '<button type="button" class="btn" data-act="disconnect">Disconnect</button>' : ''}</div>`
       : mode === 'supabase' ? `
       <p class="hint">Sign in and your recipes, brew logs and settings are kept in your account and saved as you go. Use the same sign-in on your phone and computer.</p>
-      ${acct.builtIn ? '' : `<div class="row">
-        <label class="fld w-name" for="sb-url"><span>Supabase project URL</span><input id="sb-url" value="${esc(acct.url)}" placeholder="https://xxxx.supabase.co" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
-        <label class="fld w-name" for="sb-key"><span>Public (publishable or anon) key</span><input id="sb-key" value="${esc(acct.key)}" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
-      </div>`}
+      ${projectFields()}
       ${acct.recovering ? `<form id="sb-newpass" novalidate><div class="row">
           <label class="fld w-name" for="sb-new"><span>Choose a new password</span><input id="sb-new" type="password" autocomplete="new-password"></label>
           <button type="submit" class="btn primary">Set password</button></div></form>`
         : acct.user ? `<div class="summary"><span>Signed in as <b>${esc(acct.user.email || 'your account')}</b></span></div>
         <div class="foot-actions"><button type="button" class="btn" data-act="sb-sync">Sync now</button><button type="button" class="btn" data-act="sb-signout">Sign out</button></div>`
-        : `<form id="sb-form" novalidate><div class="row">
-          <label class="fld w-name" for="sb-email"><span>Email</span><input id="sb-email" type="email" autocomplete="username" autocapitalize="off" spellcheck="false"></label>
-          <label class="fld w-name" for="sb-password"><span>Password</span><input id="sb-password" type="password" autocomplete="current-password"></label>
-        </div>
-        <div class="foot-actions"><button type="submit" class="btn primary">Sign in</button><button type="button" class="btn" data-act="sb-signup">Create account</button>
-          <button type="button" class="btn ghost" data-act="sb-recover">Forgot password</button></div></form>
-        <div class="foot-actions alt"><button type="button" class="btn small" data-act="sb-oauth" data-v="github">Continue with GitHub</button><button type="button" class="btn small" data-act="sb-oauth" data-v="google">Continue with Google</button></div>
-        <p class="hint">Signing in copies any recipes already on this device into your account.</p>`}`
+        : `${signInForm()}
+        <p class="hint">${store.demo ? 'Signing in removes the demo from this phone. Your own recipes then come from your account.' : 'Signing in copies any recipes already on this device into your account.'}</p>`}`
       : '<p class="hint">Nothing leaves this browser. Clearing its site data would delete everything, so export the recipes you care about, or choose one of the other options to keep a proper copy.</p>';
     // The Android and iOS apps keep data in a Gyle account only, so they offer no choice.
     el.innerHTML = `${native ? '' : `<div class="segs" role="group" aria-label="Where to keep your data">${seg('local', 'This device')}${seg('supabase', 'Gyle account')}${seg('git', 'GitHub repo')}</div>`}
@@ -2581,7 +2671,7 @@ function settingsView(sub) {
       <div class="foot-actions"><button type="button" class="btn" data-act="add-device">Add device</button></div>
     </section>`,
     storage: `<section class="card"><div class="sec-head"><h2>Storage</h2></div>
-      <p class="hint">${native ? 'Your recipes, brew logs and settings are kept in your Gyle account. The app keeps a working copy on this phone, so Gyle still works offline.' : 'Where your recipes, brew logs and settings are kept. Whichever you choose, this browser keeps a working copy so Gyle still works offline.'}</p>
+      <p class="hint">${store.demo && !store.connected ? 'You are in the demo. Nothing here is kept in an account. Sign in to use Gyle with your own recipes.' : native ? 'Your recipes, brew logs and settings are kept in your Gyle account. The app keeps a working copy on this phone, so Gyle still works offline.' : 'Where your recipes, brew logs and settings are kept. Whichever you choose, this browser keeps a working copy so Gyle still works offline.'}</p>
       <div id="storage"></div>
     </section>`,
   };
@@ -2601,23 +2691,38 @@ function notFound(what, back) {
   view.innerHTML = `<div class="empty-state"><h2>That ${what} is not here</h2><p>It may have been deleted, or not synced to this device yet.</p><a class="btn" href="${back}">Back</a></div>`;
 }
 
-const ROUTES = { recipes: recipesView, recipe: recipeView, sheet: sheetView, brews: brewsView, brew: brewView, tools: toolsView, tool: toolView, settings: settingsView };
+const ROUTES = { recipes: recipesView, recipe: recipeView, sheet: sheetView, brews: brewsView, brew: brewView, tools: toolsView, tool: toolView, settings: settingsView, welcome: welcomeView };
 const TAB_OF = { recipe: 'recipes', brew: 'brews', tool: 'tools' };
 let routeKey = '';
+// In an app, a person who is not signed in and not in the demo must choose one first.
+const mustChoose = () => !!native && !store.connected && !store.demo;
 
 function route(keepScroll = false) {
   const [name, ...rest] = location.hash.replace(/^#/, '').split('/');
-  const key = ROUTES[name] ? name : 'recipes';
+  const key = mustChoose() ? 'welcome' : ROUTES[name] && (name !== 'welcome' || native) ? name : 'recipes';
+  if (key === 'welcome') rest.length = 0;
   routeKey = key + '/' + rest.join('/');
   const tab = key === 'sheet' ? (rest[0] === 'brew' ? 'brews' : 'recipes') : TAB_OF[key] || key;
   document.querySelectorAll('#tabs a').forEach(a => a.toggleAttribute('aria-current', a.dataset.tab === tab));
+  document.body.classList.toggle('bare', key === 'welcome'); // the welcome screen has no tab bar
+  drawDemoBar();
   ROUTES[key](rest.join('/'));
   if (keepScroll !== true) window.scrollTo(0, 0);
+}
+// Go to a screen. Draws it again when the address is that screen already.
+function go(hash) {
+  if (location.hash === hash) route(); else location.hash = hash;
+}
+// The strip under the header that says "this is the demo", on every screen of the demo.
+function drawDemoBar() {
+  const bar = $('#demo-bar');
+  if (bar) bar.hidden = !(store.demo && !store.connected) || routeKey === 'welcome/';
 }
 
 function drawChip() {
   const chip = $('#sync-chip'), { state } = store.status, dirty = store.dirtyCount;
   const [cls, text] = state === 'syncing' ? ['busy', 'Syncing…']
+    : store.demo && !store.connected ? ['demo', 'Demo']
     : !store.connected ? ['off', native ? 'Not signed in' : 'This device only']
     : dirty ? ['dirty', store.words.pending(dirty)]
     : state === 'error' ? ['bad', 'Sync problem']
@@ -2625,10 +2730,11 @@ function drawChip() {
   chip.className = 'sync ' + cls;
   chip.textContent = text;
   chip.title = state === 'error' ? store.status.message : store.connected ? 'Sync now' : native ? 'Sign in to your Gyle account' : 'Choose where to keep your recipes';
+  drawDemoBar();
 }
 
 $('#sync-chip').addEventListener('click', async () => {
-  if (!store.connected) { location.hash = '#settings/storage'; return; }
+  if (!store.connected) { location.hash = native ? '#welcome' : '#settings/storage'; return; }
   if (store.dirtyCount) {
     if (!store.canWrite) { toast(store.words.need, true); location.hash = '#settings/storage'; return; }
     try { await store.push(); toast(store.words.all); } catch (e) { toast(e.message, true); }
@@ -2669,9 +2775,13 @@ function datalists() {
 store.init();
 datalists();
 if (native) pickSelects(); // Gyle's own popup for every <select>, in place of the phone's own list
-let lastSynced = false;
+let lastSynced = false, wasDemo = store.demo;
 store.on(() => {
   drawChip();
+  if (wasDemo && !store.demo) timer.clear(); // a timer of a demo brew
+  wasDemo = store.demo;
+  // An app whose sign-in ended (sign-out, or a session that ran out) goes back to the welcome screen.
+  if (mustChoose() && routeKey !== 'welcome/') return route();
   const synced = store.status.state === 'synced';
   // After a pull, list pages redraw; open editors only refresh their save button so typing is never interrupted.
   if (synced && !lastSynced && /^(recipes|brews)\/$/.test(routeKey)) route(true);
@@ -2713,9 +2823,10 @@ greet(arrived);
 store.sync();
 
 // First run without a repo (a local test, say): load the example recipe that ships in recipes/.
+// The apps have the demo for this.
 (async () => {
   try {
-    if (store.connected || store.list('recipes').length || localStorage.getItem('gyle.seeded')) return;
+    if (native || store.connected || store.list('recipes').length || localStorage.getItem('gyle.seeded')) return;
     const res = await fetch('recipes/house-pale-ale.json');
     if (!res.ok) return;
     store.put('recipes', 'house-pale-ale', fromBeerJSON(await res.json())[0]);

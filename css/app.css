@@ -76,6 +76,24 @@ code { font-family: var(--font-mono); font-size: .92em; }
 .sync.dirty::before { background: var(--gold); }
 .sync.bad::before { background: #ff8a7d; }
 .sync.busy::before { background: var(--gold); animation: pulse 1s infinite alternate; }
+.sync.demo { color: var(--green-deep); background: var(--gold); border-color: var(--gold); font-weight: 600; padding-left: 11px; }
+.sync.demo::before { display: none; }
+
+/* ---- the demo and the welcome screen of the Android and iOS apps ---- */
+.demo-bar {
+  display: block; padding: 9px 16px 8px; margin-top: 6px; text-align: center; text-decoration: none;
+  font: 600 12.5px/1.3 var(--font-body); color: var(--green-deep); background: var(--gold); border-bottom: 2px solid var(--ink);
+}
+.demo-bar[hidden] { display: none; }
+.demo-bar b { text-decoration: underline; text-underline-offset: 2px; margin-left: 4px; white-space: nowrap; }
+body.bare { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+.bare .tabs, .bare #sync-chip { display: none; }
+.welcome-head { display: flex; align-items: center; gap: 14px; padding: 4px 2px 0; }
+.welcome-head p { margin: 14px 0 0; color: var(--on-wall-muted); }
+#welcome-account #storage-msg:empty, .foot-actions.alt:empty { display: none; }
+#welcome-account .foot-actions.alt { padding-top: 12px; border-top: 1.5px dashed var(--line); }
+#welcome-account form { margin-top: 14px; }
+#welcome-account .foot-actions.alt { margin-top: 14px; }
 @keyframes pulse { to { opacity: .3; } }
 
 .tabs {

@@ -46,8 +46,11 @@ of a Gyle account clears the device copy.
 3. Under **Authentication → URL Configuration**, set the Site URL to the address the app is
    served from (for example `https://<you>.github.io/<repo>/`). Sign-in links and
    GitHub/Google sign-in return there.
-4. Optional: under **Authentication → Providers**, switch on GitHub or Google to use the
-   "Continue with" buttons. Email and password works without this.
+4. Optional: under **Authentication → Providers**, switch on GitHub or Google. Each one
+   needs a client ID and a secret from an OAuth app that you create at GitHub or in the
+   Google Cloud console. Supabase shows the steps and the callback address beside each
+   provider. The sign-in form shows a "Continue with" button only for a provider that is
+   switched on. Email and password works without this.
 5. Copy the project's URL and its publishable (or legacy "anon") key into `js/config.js`,
    or leave that file empty and type them into Settings on each device. Both are public
    values. Never use the secret or service-role key.
@@ -94,6 +97,7 @@ fonts/              the web fonts, served from this site
 js/app.js           the screens
 sw.js               service worker, only so Android can show timer notifications
 js/native.js        what the Android and iOS apps add to the page (nothing in a browser)
+js/demo.js          the demo recipes and brew logs of the two apps
 js/picker.js        Gyle's own popup for dropdown lists, used in the two apps
 android/            the Android app: a small shell around these same web files
 ios/                the iOS app: the same idea for iPhone and iPad
@@ -308,6 +312,11 @@ these differences:
 
 - The app keeps your data in a Gyle account (Supabase) only. It has no GitHub repo choice.
   It uses the project in `js/config.js`.
+- When you are not signed in, the app opens on a welcome screen with two choices: sign in
+  (or create an account), or open the demo.
+- The demo has four example recipes and four brew logs. A gold strip under the header marks
+  every screen of the demo. The demo stays on the phone. When you sign in, the app removes
+  the demo, so the examples never get into your account.
 - Timer alerts are Android notifications. They arrive when the app is closed or the phone is locked.
 - Exports and the brew sheet PDF go to the Downloads folder of the phone.
 - **Add photos** offers the camera and the photo picker.
@@ -373,6 +382,7 @@ view. It has every feature of the website, with these differences:
 
 - The app keeps your data in a Gyle account (Supabase) only. It has no GitHub repo choice.
   It uses the project in `js/config.js`.
+- It has the same welcome screen and demo as the Android app.
 - Timer alerts are iOS notifications. They arrive when the app is closed or the phone is locked.
 - iOS has no shared Downloads folder. An export opens the share sheet, where **Save to Files**
   keeps the file. The brew sheet PDF opens in a viewer that can also print and share it.

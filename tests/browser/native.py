@@ -5,10 +5,14 @@
 #   python3 -m http.server 8765   (from the repo root, in another terminal)
 #   python3 tests/browser/native.py
 # It prints one line per check; read the output, there are no assertions on the UI text.
-import json, base64, urllib.parse
+import json, base64, urllib.parse, pathlib
 from playwright.sync_api import sync_playwright
 SB='https://mock.supabase.co'
-users={}; tokens={}; rows={}; log=[]; n=[0]
+ROOT=pathlib.Path(__file__).resolve().parents[2]
+users={}; tokens={}; log=[]; n=[0]
+# The account already holds one recipe. The demo must not add to it.
+rows={('recipes','house-pale-ale'): {'data': json.loads((ROOT/'recipes'/'house-pale-ale.json').read_text()), 'updated_at': 'v0'}}
+services={'email': True, 'github': True, 'google': False}  # what the project has switched on
 CORS={'access-control-allow-origin':'*','access-control-allow-headers':'*','access-control-allow-methods':'*'}
 def J(route, status, body): route.fulfill(status=status, content_type='application/json', body=json.dumps(body), headers=CORS)
 def session(uid, email):
@@ -22,6 +26,7 @@ def sb(route):
     if path=='/auth/v1/signup':
         users[body['email']]='u1'; return J(route,200,session('u1',body['email']))
     if path=='/auth/v1/recover': return J(route,200,{})
+    if path=='/auth/v1/settings': return J(route,200,{"external":services})
     uid=tokens.get(r.headers.get('authorization','').replace('Bearer ',''))
     if path=='/auth/v1/user': return J(route,200,{"id":uid,"email":"stu@example.com"}) if uid else J(route,401,{"msg":"bad jwt"})
     if path=='/rest/v1/documents':
@@ -61,28 +66,48 @@ with sync_playwright() as p:
     clear=lambda: pg.evaluate('window.__calls.length = 0')
     chip=lambda: pg.inner_text('#sync-chip'); msg=lambda: pg.inner_text('#storage-msg')
 
+    names=lambda: pg.eval_on_selector_all('#recipe-list strong','o=>o.map(x=>x.textContent)')
+    shown=lambda sel: pg.eval_on_selector(sel, "e => getComputedStyle(e).display !== 'none' && !e.hidden")
+    cards=lambda: pg.eval_on_selector_all('#view .card h2','o=>o.map(x=>x.textContent)')
+
+    # First open, not signed in: the welcome screen with the two ways on, and nothing else.
     pg.goto(U); pg.wait_for_timeout(1300)
-    print('1 app, signed out: chip', repr(chip()), '| mode:', pg.evaluate("JSON.parse(localStorage.getItem('gyle.storage.v1')||'{}').mode"), '| recipes:', pg.eval_on_selector_all('#recipe-list strong','o=>o.map(x=>x.textContent)'))
+    print('1 first open:', pg.inner_text('#view h1'), cards(), '| tab bar', shown('#tabs'), '| chip', shown('#sync-chip'), '| demo strip', shown('#demo-bar'))
+    print('  sign-in form', pg.locator('#sb-form').count(), '| buttons for the services that are on:', pg.eval_on_selector_all('#sb-providers button','o=>o.map(x=>x.textContent)'), '| demo button:', pg.inner_text('[data-act=demo]'))
+    pg.goto(U+'#settings/storage'); pg.wait_for_timeout(300); print('  any other address still shows it:', pg.inner_text('#view h1'), '| recipes on the phone:', pg.evaluate("Object.keys(JSON.parse(localStorage.getItem('gyle.cache.v1') || '{}').recipes || {}).length"))
+
+    # The demo: four recipes and four brew logs, marked as a demo on every screen.
+    pg.click('[data-act=demo]'); pg.wait_for_timeout(500)
+    print('2 demo:', names(), '| chip', repr(chip()), '| strip:', pg.inner_text('#demo-bar') if shown('#demo-bar') else None, '| tab bar', shown('#tabs'), '| toast:', pg.inner_text('#toast'))
+    pg.goto(U+'#brews'); pg.wait_for_timeout(500)
+    print('  brews:', pg.eval_on_selector_all('#view .list .item', "o=>o.map(x=>x.querySelector('strong').textContent+' ['+x.querySelector('.pill').textContent+']')"), '| brew days chart', shown('#brew-days'))
+    pg.click('#view .list .item >> nth=1'); pg.wait_for_timeout(600)
+    print('  a fermenting brew:', pg.input_value('#f-name'), '| readings', pg.locator('#sec-readings input[type=date]').count(), '| timeline entries', pg.locator('.tl-entry').count(), '| steps ticked', pg.locator('.steps input:checked').count(), 'of', pg.locator('.steps input').count())
     pg.goto(U+'#settings/storage'); pg.wait_for_timeout(300)
     print('  storage card: mode buttons', pg.locator('#storage .seg').count(), '| sign-in form', pg.locator('#sb-form').count(), '| GitHub repo fields', pg.locator('#gh-repo').count())
-    print('  hint:', pg.inner_text('.card > .hint')[:70])
+    print('  hints:', pg.inner_text('.card > .hint')[:60], '|', pg.inner_text('#storage .hint >> nth=-2')[:50])
+    pg.reload(); pg.wait_for_timeout(900); pg.goto(U+'#recipes'); pg.wait_for_timeout(300); print('  after a restart: still the demo', len(names()), repr(chip()))
 
     # A dropdown opens Gyle's own popup, and a choice there reaches the page as a normal change.
-    pg.goto(U+'#recipes'); pg.wait_for_timeout(400); pg.click('#show'); pg.wait_for_timeout(200)
+    pg.click('#show'); pg.wait_for_timeout(200)
     print('  dropdown:', pg.inner_text('dialog.choose h2'), pg.eval_on_selector_all('dialog.choose .pick', "o=>o.map(x=>x.textContent+(x.classList.contains('on')?'*':''))"))
-    pg.click('dialog.choose .pick >> text=Archived'); pg.wait_for_timeout(300)
-    print('  chosen:', pg.eval_on_selector('#show', 'e=>e.selectedOptions[0].text'), '| popup gone:', pg.locator('dialog.choose').count()==0, '| list now:', pg.eval_on_selector_all('#recipe-list strong','o=>o.map(x=>x.textContent)'))
+    pg.click('dialog.choose .pick >> text=In planning'); pg.wait_for_timeout(300)
+    print('  chosen:', pg.eval_on_selector('#show', 'e=>e.selectedOptions[0].text'), '| popup gone:', pg.locator('dialog.choose').count()==0, '| list now:', names())
     pg.click('#show'); pg.click('dialog.choose .pick >> text=Ready and planning'); pg.wait_for_timeout(300)
     pg.click('#sort'); pg.wait_for_timeout(200); pg.mouse.click(5, 5); pg.wait_for_timeout(200)
     print('  tap outside closes it:', pg.locator('dialog.choose').count()==0, '| unchanged:', pg.eval_on_selector('#sort', 'e=>e.selectedOptions[0].text'))
-    pg.goto(U+'#settings/storage'); pg.wait_for_timeout(300)
+
+    # From the demo to an account: the strip leads to the welcome screen. Signing in removes the demo.
+    pg.click('#demo-bar'); pg.wait_for_timeout(300)
+    print('3 from the demo strip:', cards(), '|', pg.eval_on_selector_all('#welcome-demo button','o=>o.map(x=>x.textContent)'))
+    pg.click('[data-act=demo-back]'); pg.wait_for_timeout(300); print('  back to the demo:', len(names()), 'recipes'); pg.click('#sync-chip'); pg.wait_for_timeout(300)
     pg.click('[data-act=sb-oauth][data-v=github]'); pg.wait_for_timeout(200)
-    print('2 GitHub sign-in opens outside:', [urllib.parse.unquote(c[0]).replace(SB,'') for c in calls('openExternal')], '| page stayed:', pg.url.endswith('#settings/storage'))
+    print('  GitHub sign-in opens outside:', [urllib.parse.unquote(c[0]).replace(SB,'') for c in calls('openExternal')], '| page stayed:', pg.inner_text('#view h1'))
     pg.fill('#sb-email','stu@example.com'); pg.click('[data-act=sb-recover]'); pg.wait_for_timeout(300)
-    print('  reset link comes back to:', [urllib.parse.unquote(l.split('redirect_to=')[1]) for l in log if 'recover' in l])
-    pg.fill('#sb-password','hunter22'); pg.click('[data-act=sb-signup]'); pg.wait_for_timeout(1500)
-    print('3 signed up:', pg.inner_text('#storage .summary'), '|', msg(), '| sign-up link comes back to:', [urllib.parse.unquote(l.split('redirect_to=')[1]) for l in log if 'signup' in l])
-    pg.wait_for_timeout(3000); print('  autosave: chip', repr(chip()), '| rows:', sorted(rows))
+    print('  reset link comes back to:', [urllib.parse.unquote(l.split('redirect_to=')[1]) for l in log if 'recover' in l], '|', msg())
+    pg.fill('#sb-password','hunter22'); pg.click('[data-act=sb-signup]'); pg.wait_for_timeout(1800)
+    print('  signed up: toast', repr(pg.inner_text('#toast')), '| recipes', names(), '| chip', repr(chip()), '| strip', shown('#demo-bar'), '| tab bar', shown('#tabs'), '| sign-up link comes back to:', [urllib.parse.unquote(l.split('redirect_to=')[1]) for l in log if 'signup' in l])
+    pg.wait_for_timeout(3000); print('  the demo did not go into the account: rows', sorted(rows), '| brews on the phone', pg.evaluate("Object.keys(JSON.parse(localStorage.getItem('gyle.cache.v1')).brews).length"), '| stored state', pg.evaluate("localStorage.getItem('gyle.storage.v1')"))
 
     pg.goto(U+'#recipe/house-pale-ale'); pg.wait_for_timeout(600); clear()
     pg.click('[data-act=export]'); pg.wait_for_timeout(200); pg.click('dialog.sheet [data-fmt=json]'); pg.wait_for_timeout(300)
@@ -118,14 +143,19 @@ with sync_playwright() as p:
     key=json.loads(calls('setAlarms')[-1][0])[-1]['key']; pg.wait_for_timeout(2300)
     print('8 step ended:', calls('showAlert')[-1][1], '| under the key the app has:', calls('showAlert')[-1][0]==key, '| alarms left:', calls('setAlarms')[-1], '| awake', calls('keepAwake')[-1])
 
-    # The app hands a sign-in link to the page that is already open.
-    pg.goto(U+'#settings/storage'); pg.wait_for_timeout(300); pg.click('[data-act=sb-signout]'); pg.wait_for_timeout(600)
-    print('9 signed out: chip', repr(chip()), '| mode still', pg.evaluate("JSON.parse(localStorage.getItem('gyle.storage.v1')).mode"))
-    s=session('u1','stu@example.com'); pg.goto(U+'#recipes'); pg.wait_for_timeout(500)
+    print('  autosave: the brew log is in the account:', sorted(k[0] for k in rows))
+    # Sign out: back to the welcome screen. Then the app hands a sign-in link to the open page.
+    pg.goto(U+'#settings/storage'); pg.wait_for_timeout(300); pg.click('[data-act=sb-signout]'); pg.wait_for_timeout(700)
+    print('9 signed out:', pg.inner_text('#view h1'), cards(), '| toast:', pg.inner_text('#toast'), '| recipes on the phone:', pg.evaluate("Object.keys(JSON.parse(localStorage.getItem('gyle.cache.v1')).recipes).length"))
+    s=session('u1','stu@example.com')
     pg.evaluate(f"location.href = '{U}#access_token={s['access_token']}&refresh_token={s['refresh_token']}&expires_in=3600&token_type=bearer'"); pg.wait_for_timeout(1500)
     print('  link while open: url', pg.url.split('/')[-1], '| toast:', pg.inner_text('#toast'), '|', pg.inner_text('#storage .summary'), '| chip', repr(chip()))
-    pg.goto(U+'#recipes'); pg.wait_for_timeout(400); print('  recipes back:', pg.eval_on_selector_all('#recipe-list strong','o=>o.map(x=>x.textContent)'))
+    pg.goto(U+'#recipes'); pg.wait_for_timeout(400); print('  recipes back:', names())
     pg.evaluate(f"location.href = '{U}#error=access_denied&error_description=Email+link+is+invalid+or+has+expired'"); pg.wait_for_timeout(500)
     print('  bad link:', pg.inner_text('#toast'))
+    # A project with no outside sign-in service: the form has no such button.
+    services['github']=False; pg.goto(U+'#settings/storage'); pg.wait_for_timeout(300); pg.click('[data-act=sb-signout]'); pg.wait_for_timeout(700)
+    pg.evaluate("localStorage.removeItem('gyle.supabase.providers')"); pg.reload(); pg.wait_for_timeout(1200)
+    print('  services all off: buttons', pg.eval_on_selector_all('#sb-providers button','o=>o.map(x=>x.textContent)'), '| the block is hidden:', not shown('#sb-providers'))
     wide = "[...document.querySelectorAll('body *')].filter(e => e.getBoundingClientRect().right > innerWidth + 0.5).map(e => e.tagName + '#' + e.id + '.' + e.className + ' ' + Math.round(e.getBoundingClientRect().right))"
     print('overflow', pg.evaluate('document.documentElement.scrollWidth > innerWidth'), pg.evaluate(wide), errs); b.close()
